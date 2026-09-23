@@ -34,9 +34,10 @@
    - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to Gmail Spam, skip ntfy
    - ✉️ Gmail `append(INBOX or [Gmail]/Spam, raw)`
    - 🗑️ Source UID `\Deleted` + expunge
-   - ❌ Append failed → do not advance state, retry
+   - ❌ Append failed → count in `state.failed`, advance past UID, retry later (no queue jam)
    - ⚠️ Delete failed after successful append → Gmail rollback (search by Message-ID and expunge)
-   - 💾 Save state → 🔔 ntfy POST *("From – Subject")*
+   - 📮 3rd failure → one-time Gmail notice, still retried, no error ntfy
+   - 💾 Save state → 🔔 ntfy POST *("From – Subject")* on success only
 4. 😴 IDLE: imapflow auto-IDLE; `exists` event → catch-up
 5. ⏱️ Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
 6. 🔌 Reconnect: imapflow recovery + own catch-up
@@ -54,10 +55,24 @@ Source headers `X-Spam-Flag`, `X-Spam-Status`, `X-UI-Filterresults` are checked:
 
 💡 Tip: prefer provider-side spam folders *(e.g. 1und1/IONOS → move to Spam)* so spam never reaches this relay.
 
+### 🚨 Failure handling
+
+- 🧩 A single bad mail **does not block** later mails (per-message try/catch)
+- 🔁 Failed UIDs stay on the source, are retried every catch-up, counted in `state.failed`
+- 📮 After **3 failed attempts** → **one** notice mail to Gmail INBOX  
+  `[imap2gmail] not delivered: <subject>` (never repeated for that UID)
+- 📭 No error ntfy pushes; details stay in `docker compose logs`
+- 💥 Crash between append↔delete → `pendingUid` recovery (Message-ID check)
+
 ### 🗃️ State (`/data/state.json`)
 
 ```json
-{ "uidValidity": 123456, "lastUid": 98765, "pendingUid": null }
+{
+  "uidValidity": 123456,
+  "lastUid": 98765,
+  "pendingUid": null,
+  "failed": { "42": { "attempts": 1, "reported": false } }
+}
 ```
 
 - 🔄 After restart → only `uid > lastUid` → **no duplicates**
@@ -171,10 +186,10 @@ imap2gmail/
 ├── 📦 src/
 │   ├── index.ts     # 🚪 Entry, main loop, shutdown
 │   ├── config.ts    # ⚙️ Env vars
-│   ├── state.ts     # 🗃️ JSON state read/write
+│   ├── state.ts     # 🗃️ JSON state: uid, pendingUid, failed attempts
 │   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete, spam header
 │   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/Spam), rollback
-│   ├── relay.ts     # 🔄 Catch-up, pending-UID, spam action, errors/rollback, ntfy
+│   ├── relay.ts     # 🔄 Catch-up, pending-UID, spam, failure retries/notice, ntfy
 │   └── ntfy.ts      # 🔔 HTTP-POST *(empty URL = off)*
 ├── 🐳 Dockerfile
 ├── 🐳 docker-compose.yml

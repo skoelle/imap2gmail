@@ -3,14 +3,35 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+export interface FailedEntry {
+  attempts: number;
+  reported: boolean;
+}
+
 export interface RelayState {
   uidValidity: number;
   lastUid: number;
   /** UID where Append succeeded but source-delete is not confirmed yet. */
   pendingUid?: number;
+  /** Delivery failures still retried on the source (key = UID). */
+  failed?: Record<string, FailedEntry>;
 }
 
 const EMPTY_STATE: RelayState = { uidValidity: 0, lastUid: 0 };
+
+function parseFailed(raw: unknown): Record<string, FailedEntry> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, FailedEntry> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const entry = value as Partial<FailedEntry>;
+    out[key] = {
+      attempts: Number(entry.attempts ?? 0),
+      reported: Boolean(entry.reported),
+    };
+  }
+  return out;
+}
 
 export class StateStore {
   constructor(private readonly filePath: string) {}
@@ -26,6 +47,7 @@ export class StateStore {
           parsed.pendingUid === undefined || parsed.pendingUid === null
             ? undefined
             : Number(parsed.pendingUid),
+        failed: parseFailed(parsed.failed),
       };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;

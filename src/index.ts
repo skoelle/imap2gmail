@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   const sink = new Sink(config.gmail);
   const state = new StateStore(config.stateFile);
   const ntfy = new Ntfy(config.ntfyTopicUrl, config.ntfyBlacklist);
-  const relay = new Relay(source, sink, state, ntfy, config.spamAction);
+  const relay = new Relay(source, sink, state, ntfy, config.spamAction, config.gmail.email);
 
   let shuttingDown = false;
 
