@@ -85,8 +85,18 @@ cp .env.example .env
 ### 4️⃣ 🚀 Start
 
 ```bash
-docker compose up --build -d
+# pull published image (or build locally with --build)
+docker compose pull
+docker compose up -d
 docker compose logs -f
+```
+
+📦 Image: `ghcr.io/skoelle/imap2gmail:latest`
+
+**Local build** *(instead of pull)*:
+
+```bash
+docker compose up --build -d
 ```
 
 **Local** *(without Docker)*:
@@ -103,7 +113,7 @@ npm start
 ## 🧪 Test procedure
 
 1. 📝 Create a new IMAP test account, fill in `.env`
-2. 🐳 `docker compose up --build`
+2. 🐳 `docker compose pull && docker compose up -d`
 3. ✉️ Send a test mail to the test account → verify:
    - ✅ Mail visible in Gmail
    - 🧹 Test account INBOX **empty** *(deleted)*
