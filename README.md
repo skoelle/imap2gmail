@@ -1,43 +1,43 @@
 # imap2gmail
 
-Ersetzt den Gmail-POP-Abruf („E‑Mails von anderen Konten abrufen“, deaktiviert ab 2026/2027)
-durch einen eigenen Dauer-Container:
+Replaces Gmail POP fetching (“Get mail from other accounts”, disabled in 2026/2027)
+with a long-running container:
 
-**Quell-IMAP abholen → nach Gmail APPEND → Quell-Mail wirklich löschen → optional ntfy.**
+**Fetch from source IMAP → APPEND to Gmail → really delete source mail → optional ntfy.**
 
-Technik: TypeScript + [imapflow](https://github.com/postalsys/imapflow)
-(IDLE-Dauerbetrieb, Raw-Stream, `messageAppend`, Flags + Expunge).
+Stack: TypeScript + [imapflow](https://github.com/postalsys/imapflow)
+(IDLE long-run, raw stream, `append`, flags + expunge).
 
-## Architektur
+## Architecture
 
 ```
-Quell-IMAP (Testkonto / inseco-Forward)          Gmail IMAP
+Source IMAP (test account / forward target)       Gmail IMAP
 ┌──────────────────────────────┐               ┌──────────────────┐
-│ imapflow: select INBOX       │               │ messageAppend    │
+│ imapflow: select INBOX       │               │ append           │
 │ Catch-up: uid > lastUid      │──raw RFC822──▶│ (raw Buffer)     │
-│ IDLE (autoIdle) + Fallback-  │               └──────────────────┘
-│   Poll alle N Sek.           │                      │ bei Erfolg
-│ State: uidValidity + lastUid │               Quelle: \Deleted +
-└──────────────────────┬───────┘               EXPUNGE (wirklich weg)
+│ IDLE + fallback poll         │               └──────────────────┘
+│   every N seconds            │                      │ on success
+│ State: uidValidity + lastUid │               Source: \Deleted +
+└──────────────────────┬───────┘               EXPUNGE (really gone)
                        │                              │
                        ▼                              ▼
                  state.json (/data)            ntfy HTTP-POST (optional)
 ```
 
-### Ablauf
+### Flow
 
-1. Quelle verbinden, INBOX selecten, `uidValidity` gegen State prüfen
-2. Catch-up: alle `uid > lastUid` als rohen RFC822-Buffer holen
-3. Pro Mail:
-   - Gmail `messageAppend(INBOX, raw)`
-   - Quell-UID `\Deleted` + Expunge
-   - Fehler bei Append: kein State-Vorziehen, Retry
-   - Fehler beim Löschen nach erfolgreichem Append: Gmail-Rollback (per Message-ID suchen und expungen)
-   - State speichern → ntfy POST („Von – Betreff“)
-4. IDLE: imapflow `autoIdle`; Event `exists` → Catch-up
-5. Fallback-Poll alle `FALLBACK_POLL_SECONDS` (Safety-Net)
-6. Reconnect: imapflow-Recovery + eigener Catch-up
-7. Crash-Fenster Append↔Delete: `pendingUid` im State → beim Start gezielt nacharbeiten
+1. Connect to source, select INBOX, compare `uidValidity` against state
+2. Catch-up: fetch all `uid > lastUid` as raw RFC822 buffers
+3. Per message:
+   - Gmail `append(INBOX, raw)`
+   - Source UID `\Deleted` + expunge
+   - Append failed: do not advance state, retry
+   - Delete failed after successful append: Gmail rollback (search by Message-ID and expunge)
+   - Save state → ntfy POST (“From – Subject”)
+4. IDLE: imapflow auto-IDLE; `exists` event → catch-up
+5. Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
+6. Reconnect: imapflow recovery + own catch-up
+7. Crash window Append↔Delete: `pendingUid` in state → targeted recovery on startup
 
 ### State (`/data/state.json`)
 
@@ -45,109 +45,108 @@ Quell-IMAP (Testkonto / inseco-Forward)          Gmail IMAP
 { "uidValidity": 123456, "lastUid": 98765, "pendingUid": null }
 ```
 
-- Nach Neustart: nur `uid > lastUid` → keine Duplikate
-- `uidValidity`-Wechsel: Reset + Nacharbeit der offenen UID
+- After restart: only `uid > lastUid` → no duplicates
+- `uidValidity` change: reset + rework any open UID
 
 ## Setup
 
-### 1. Quell-IMAP-Testkonto anlegen
+### 1. Create a source IMAP test account
 
-Neues IMAP-Testkonto (z. B. bei einem Provider Deiner Wahl). Später
-Forwarding von `*@inseco.de` auf diese Adresse – **ohne Migration** von
-Bestandsmails (IMAP-Konto leer, Gmail hat alles).
+Create a new IMAP test account (any provider you like). Later, forward
+your domain mail to this address – **without migrating** existing mail
+(source IMAP empty, Gmail already has everything).
 
-### 2. Gmail-App-Passwort
+### 2. Gmail app password
 
-Google-Konto → Sicherheit → 2-Faktor → **App-Passwörter** anlegen
+Google Account → Security → 2-Step Verification → create an **App password**
 (<https://myaccount.google.com/apppasswords>).
 
-### 3. `.env` anlegen
+### 3. Create `.env`
 
 ```bash
 cp .env.example .env
-# Werte eintragen
+# fill in values
 ```
 
-| Variable | Bedeutung |
+| Variable | Meaning |
 |---|---|
-| `SOURCE__HOST/PORT/EMAIL/PASSWORD` | Quell-IMAP |
-| `GMAIL__EMAIL` / `GMAIL__APP_PASSWORD` | Gmail-Ziel (App-Passwort) |
+| `SOURCE__HOST/PORT/EMAIL/PASSWORD` | Source IMAP |
+| `GMAIL__EMAIL` / `GMAIL__APP_PASSWORD` | Gmail target (app password) |
 | `GMAIL__HOST/PORT` | Default `imap.gmail.com:993` |
-| `NTFY__TOPIC_URL` | z. B. `https://ntfy.sh/mein-topic`; leer = aus |
-| `NTFY__BLACKLIST` | From-Adressen ohne ntfy (kommagetrennt), z. B. `user@example.org` |
+| `NTFY__TOPIC_URL` | e.g. `https://ntfy.sh/my-topic`; empty = off |
+| `NTFY__BLACKLIST` | From addresses without ntfy (comma-separated), e.g. `user@example.org` |
 | `FALLBACK_POLL_SECONDS` | Default `60` |
 | `STATE_FILE` | Default `/data/state.json` |
 
-### 4. Starten
+### 4. Start
 
 ```bash
 docker compose up --build -d
 docker compose logs -f
 ```
 
-Lokal (ohne Docker):
+Local (without Docker):
 
 ```bash
 npm install
 npm run build
-# .env in Environment laden, dann:
+# load .env into the environment, then:
 npm start
 ```
 
-## Testablauf
+## Test procedure
 
-1. Neues IMAP-Testkonto anlegen, `.env` füllen
+1. Create a new IMAP test account, fill in `.env`
 2. `docker compose up --build`
-3. Testmail ans Testkonto → Prüfung:
-   - Mail in Gmail sichtbar
-   - Testkonto-INBOX **leer** (gelöscht)
-   - `data/state.json` inkrementiert
-   - ntfy kommt (falls gesetzt)
-4. Container neustarten → keine Doppelzustellung
-5. Kurzer Netz-Abbruch → Reconnect + Catch-up ohne Verlust/Duplikat
-6. Wenn es klappt: Forwarding `*@inseco.de` → Testadresse aktivieren
+3. Send a test mail to the test account → verify:
+   - Mail visible in Gmail
+   - Test account INBOX **empty** (deleted)
+   - `data/state.json` advanced
+   - ntfy arrives (if configured)
+4. Restart the container → no duplicate delivery
+5. Brief network drop → reconnect + catch-up without loss/duplicates
+6. If it works: enable forwarding to the test address
 
-## Umstellung von Gmail-POP (manuell, nach erfolgreichem Test)
+## Switching off Gmail POP (manual, after a successful test)
 
-> **Wichtig:** Erst umschalten, wenn imap2gmail stabil lief – sonst droht
-> ein Doppelabruf bis zur POP-Entfernung (Jan 2027).
+> **Important:** Only switch once imap2gmail is stable – otherwise you risk
+> double fetching until POP is removed (Jan 2027).
 
-1. Testphase wie oben abschließen
-2. Forwarding `*@inseco.de` → Testadresse aktivieren
-3. Altes POP-Konto in Gmail entfernen:
-   **Einstellungen → Konten & Import → „E‑Mails von anderen Konten abrufen“**
-   → Konto entfernen
-4. Bereits importierte Mails bleiben in Gmail erhalten
-   (Quelle: <https://support.google.com/mail/answer/16604719>)
+1. Complete the test phase as above
+2. Enable forwarding to the test address
+3. Remove the old POP account in Gmail:
+   **Settings → Accounts and Import → “Get mail from other accounts”**
+   → remove account
+4. Already imported mails stay in Gmail
+   (source: <https://support.google.com/mail/answer/16604719>)
 
-Hintergrund: Google schaltet POP ab – seit Q1 2026 keine neuen Einrichtungen,
-Bestandsnutzung bis Jan 2027, danach vollständige Entfernung.
+Background: Google is turning POP off – no new setups since Q1 2026,
+existing use until Jan 2027, then full removal.
 
-## Entwicklung
+## Development
 
 ```bash
 npm run build   # tsc
 npm run dev     # tsx src/index.ts
 ```
 
-### Projektstruktur
+### Project structure
 
 ```
 imap2gmail/
 ├── src/
-│   ├── index.ts     # Entry, Main-Loop, Shutdown
-│   ├── config.ts    # Env-Vars
-│   ├── state.ts     # JSON-State lesen/schreiben
-│   ├── source.ts    # imapflow Quelle: connect, IDLE, fetch raw, delete
-│   ├── sink.ts      # imapflow Gmail: messageAppend, Rollback
-│   ├── relay.ts     # Catch-up, pending-UID, Fehler/Rollback, ntfy
-│   └── ntfy.ts      # HTTP-POST (leere URL = aus)
+│   ├── index.ts     # Entry, main loop, shutdown
+│   ├── config.ts    # Env vars
+│   ├── state.ts     # JSON state read/write
+│   ├── source.ts    # imapflow source: connect, IDLE, fetch raw, delete
+│   ├── sink.ts      # imapflow Gmail: append, rollback
+│   ├── relay.ts     # Catch-up, pending-UID, errors/rollback, ntfy
+│   └── ntfy.ts      # HTTP-POST (empty URL = off)
 ├── Dockerfile
 ├── docker-compose.yml
-├── .env.example
-└── PLAN.md
+└── .env.example
 ```
 
-## Lizenz
+## License
 
 MIT
