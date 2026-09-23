@@ -1,0 +1,9 @@
+services:
+  imap2gmail:
+    build: .
+    container_name: imap2gmail
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data

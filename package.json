@@ -1,0 +1,23 @@
+{
+  "name": "imap2gmail",
+  "version": "1.0.0",
+  "description": "Fetch mail from a source IMAP mailbox and append it to Gmail (Gmail POP replacement)",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "imapflow": "^1.0.168"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
