@@ -149,4 +149,4 @@ imap2gmail/
 
 ## License
 
-MIT
+Licensed under the [MIT License](LICENSE) - Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)

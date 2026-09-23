@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
+// Licensed under the MIT License. See LICENSE file in project root for details.
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
