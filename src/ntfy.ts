@@ -39,6 +39,7 @@ export class Ntfy {
         headers: {
           Title: 'imap2gmail',
           Tags: 'email,inbox',
+          Priority: 'urgent',
         },
       });
       if (!res.ok) {
