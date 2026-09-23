@@ -1,7 +1,6 @@
 services:
   imap2gmail:
     image: ghcr.io/skoelle/imap2gmail:latest
-    build: .
     container_name: imap2gmail
     restart: unless-stopped
     env_file:
