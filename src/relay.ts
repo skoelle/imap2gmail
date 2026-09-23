@@ -248,7 +248,7 @@ export class Relay {
         this.advanceLastUid(kind, uidValidity, uid);
         const spamNote = treatAsSpam ? ' (spam)' : '';
         console.log(
-          `[relay] ${kind} delivered previously failed uid=${uid}${spamNote} folder=${gmailFolder} subject="${message.subject}"`,
+          `[relay] ${kind} delivered previously failed uid=${uid}${spamNote} folder=${gmailFolder} to="${message.to}" subject="${message.subject}"`,
         );
         if (this.shouldNotify(kind, message)) {
           await this.ntfy.notify(message.from, message.subject);
@@ -335,7 +335,7 @@ export class Relay {
     this.clearFailed(kind, message.uid);
     const spamNote = treatAsSpam ? ' (spam)' : '';
     console.log(
-      `[relay] ${kind} delivered uid=${message.uid}${spamNote} folder=${folder} subject="${message.subject}"`,
+      `[relay] ${kind} delivered uid=${message.uid}${spamNote} folder=${folder} to="${message.to}" subject="${message.subject}"`,
     );
     if (this.shouldNotify(kind, message)) {
       await this.ntfy.notify(message.from, message.subject);

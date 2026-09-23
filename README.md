@@ -38,10 +38,18 @@
    - ⚠️ Delete failed after successful append → Gmail rollback (search by Message-ID and expunge)
    - 📮 3rd failure → one-time Gmail notice, still retried, no error ntfy
    - 💾 Save state → 🔔 ntfy POST *("From – Subject")* on success only
+   - 📋 Log line includes first recipient `to="…"` *(grep-able; ntfy unchanged)*
+
 4. 😴 IDLE: imapflow auto-IDLE; `exists` event → catch-up
 5. ⏱️ Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
 6. 🔌 Reconnect: imapflow recovery + own catch-up
 7. 🚨 Crash window Append↔Delete: `pendingUid` in state → targeted recovery on startup
+
+**Recipient frequency** (docker logs only):
+
+```bash
+docker compose logs | grep -o 'to="[^"]*"' | sort | uniq -c | sort -rn
+```
 
 ### 🛡️ Spam handling
 

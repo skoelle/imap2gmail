@@ -15,6 +15,7 @@ export interface SourceMessage {
   raw: Buffer;
   messageId: string;
   from: string;
+  to: string;
   subject: string;
   isSpam: boolean;
 }
@@ -146,6 +147,7 @@ function toSourceMessage(msg: FetchMessageObject): SourceMessage {
     raw,
     messageId: headers.messageId,
     from: headers.from,
+    to: headers.to,
     subject: headers.subject,
     isSpam: headers.isSpam,
   };
@@ -154,6 +156,7 @@ function toSourceMessage(msg: FetchMessageObject): SourceMessage {
 interface ParsedHeaders {
   messageId: string;
   from: string;
+  to: string;
   subject: string;
   isSpam: boolean;
 }
@@ -174,9 +177,22 @@ function parseHeaders(raw: Buffer): ParsedHeaders {
   return {
     messageId: decodeMimeWords(stripAngles(map.get('message-id') ?? '')),
     from: decodeMimeWords(map.get('from') ?? ''),
+    to: firstRecipient(map),
     subject: decodeMimeWords(map.get('subject') ?? ''),
     isSpam: isSpamMessage(map),
   };
+}
+
+/** Prefer delivery headers over To; first address only. */
+function firstRecipient(headers: Map<string, string>): string {
+  for (const name of ['delivered-to', 'x-original-to', 'x-forwarded-to', 'to']) {
+    const raw = headers.get(name);
+    if (!raw) continue;
+    const decoded = decodeMimeWords(raw);
+    const first = decoded.split(',')[0]?.trim() ?? '';
+    if (first) return first;
+  }
+  return '';
 }
 
 function isSpamMessage(headers: Map<string, string>): boolean {
