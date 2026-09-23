@@ -11,6 +11,8 @@ export type SpamAction = 'gmail-spam' | 'inbox' | 'skip';
 
 export interface AppConfig {
   source: ImapAccountConfig;
+  /** Source spam folder path (e.g. "Spam"); empty = disabled. */
+  sourceSpamFolder: string;
   gmail: ImapAccountConfig;
   ntfyTopicUrl: string;
   ntfyBlacklist: string[];
@@ -59,6 +61,7 @@ export function loadConfig(): AppConfig {
       email: requireEnv('SOURCE__EMAIL'),
       password: requireEnv('SOURCE__PASSWORD'),
     },
+    sourceSpamFolder: optionalEnv('SOURCE__SPAM_FOLDER', ''),
     gmail: {
       host: optionalEnv('GMAIL__HOST', 'imap.gmail.com'),
       port: intEnv('GMAIL__PORT', 993),

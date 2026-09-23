@@ -45,7 +45,9 @@
 
 ### 🛡️ Spam handling
 
-Source headers `X-Spam-Flag`, `X-Spam-Status`, `X-UI-Filterresults` are checked:
+Two independent paths:
+
+**A) INBOX headers** (`X-Spam-Flag`, `X-Spam-Status`, `X-UI-Filterresults`):
 
 | `SPAM__ACTION` | Behavior |
 |---|---|
@@ -53,7 +55,14 @@ Source headers `X-Spam-Flag`, `X-Spam-Status`, `X-UI-Filterresults` are checked:
 | `inbox` | Append to Gmail `INBOX` as usual (log only) |
 | `skip` | Do not append to Gmail; delete from source |
 
-💡 Tip: prefer provider-side spam folders *(e.g. 1und1/IONOS → move to Spam)* so spam never reaches this relay.
+**B) Source spam folder** (`SOURCE__SPAM_FOLDER=Spam`, optional):
+
+- Polled on every catch-up *(no IDLE on that folder; max ~`FALLBACK_POLL_SECONDS` delay)*
+- Always → Gmail `[Gmail]/Spam` (or delete-only if `SPAM__ACTION=skip`)
+- **Never ntfy**
+- Own cursor in `state.spam` (UIDs are per mailbox)
+
+💡 Tip: keep provider spam *in its source folder* **or** in INBOX with headers – both land in Gmail Spam for review.
 
 ### 🚨 Failure handling
 
@@ -71,10 +80,12 @@ Source headers `X-Spam-Flag`, `X-Spam-Status`, `X-UI-Filterresults` are checked:
   "uidValidity": 123456,
   "lastUid": 98765,
   "pendingUid": null,
-  "failed": { "42": { "attempts": 1, "reported": false } }
+  "failed": { "42": { "attempts": 1, "reported": false } },
+  "spam": { "uidValidity": 111, "lastUid": 5, "failed": {} }
 }
 ```
 
+- Top level = **INBOX**; `spam` = optional source spam folder
 - 🔄 After restart → only `uid > lastUid` → **no duplicates**
 - 🔁 `uidValidity` change → reset + rework any open UID
 
@@ -103,6 +114,7 @@ cp .env.example .env
 | Variable | Meaning |
 |---|---|
 | `SOURCE__HOST/PORT/EMAIL/PASSWORD` | 📥 Source IMAP |
+| `SOURCE__SPAM_FOLDER` | 🛡️ Optional source spam folder *(e.g. `Spam`)* → Gmail Spam, no ntfy; empty = off |
 | `GMAIL__EMAIL` / `GMAIL__APP_PASSWORD` | 📤 Gmail target *(app password)* |
 | `GMAIL__HOST/PORT` | 🌐 Default `imap.gmail.com:993` |
 | `NTFY__TOPIC_URL` | 🔔 e.g. `https://ntfy.sh/my-topic`; empty = off |

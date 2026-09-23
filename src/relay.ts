@@ -4,9 +4,11 @@ import type { SpamAction } from './config.js';
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
-import type { FailedEntry, RelayState, StateStore } from './state.js';
+import type { FailedEntry, FolderState, StateStore } from './state.js';
 
 const MAX_FAIL_ATTEMPTS = 3;
+
+type FolderKind = 'inbox' | 'spam';
 
 export class Relay {
   private busy = false;
@@ -19,6 +21,7 @@ export class Relay {
     private readonly ntfy: Ntfy,
     private readonly spamAction: SpamAction = 'gmail-spam',
     private readonly noticeFrom = 'imap2gmail@localhost',
+    private readonly sourceSpamFolder = '',
   ) {}
 
   async catchUp(): Promise<void> {
@@ -40,102 +43,169 @@ export class Relay {
   private async runOnce(): Promise<void> {
     await this.source.ensureConnected();
     await this.sink.ensureConnected();
-    await this.source.selectInbox();
+
+    await this.processFolder('inbox');
+
+    if (this.sourceSpamFolder) {
+      try {
+        await this.processFolder('spam');
+      } catch (err) {
+        console.error(
+          `[relay] source spam folder "${this.sourceSpamFolder}" failed:`,
+          err instanceof Error ? err.message : err,
+        );
+      }
+      await this.source.selectInbox();
+    }
+  }
+
+  private mailboxPath(kind: FolderKind): string {
+    return kind === 'spam' ? this.sourceSpamFolder : 'INBOX';
+  }
+
+  private loadFolder(kind: FolderKind): FolderState {
+    const state = this.state.load();
+    if (kind === 'spam') {
+      return state.spam ?? { uidValidity: 0, lastUid: 0, failed: {} };
+    }
+    return {
+      uidValidity: state.uidValidity,
+      lastUid: state.lastUid,
+      pendingUid: state.pendingUid,
+      failed: state.failed,
+    };
+  }
+
+  private saveFolder(kind: FolderKind, folder: FolderState): void {
+    const state = this.state.load();
+    if (kind === 'spam') {
+      this.state.save({ ...state, spam: folder });
+      return;
+    }
+    this.state.save({
+      ...state,
+      uidValidity: folder.uidValidity,
+      lastUid: folder.lastUid,
+      pendingUid: folder.pendingUid,
+      failed: folder.failed,
+    });
+  }
+
+  /** Mails from the source spam folder always target Gmail Spam (or skip). */
+  private isSourceSpam(kind: FolderKind): boolean {
+    return kind === 'spam';
+  }
+
+  private shouldNotify(kind: FolderKind, message: SourceMessage): boolean {
+    if (kind === 'spam') return false;
+    if (message.isSpam && this.spamAction !== 'inbox') return false;
+    return true;
+  }
+
+  private async processFolder(kind: FolderKind): Promise<void> {
+    await this.source.selectMailbox(this.mailboxPath(kind));
 
     const mailbox = this.source.mailbox;
     if (!mailbox) {
-      throw new Error('Source mailbox not selected');
+      throw new Error(`Source mailbox not selected: ${this.mailboxPath(kind)}`);
     }
     const uidValidity = Number(mailbox.uidValidity as bigint | number);
-    let state = this.state.load();
+    let folder = this.loadFolder(kind);
 
-    if (state.uidValidity !== uidValidity) {
-      if (state.lastUid > 0 || state.uidValidity > 0) {
+    if (folder.uidValidity !== uidValidity) {
+      if (folder.lastUid > 0 || folder.uidValidity > 0) {
         console.warn(
-          `[relay] uidValidity changed (${state.uidValidity} → ${uidValidity}); resetting lastUid`,
+          `[relay] ${kind} uidValidity changed (${folder.uidValidity} → ${uidValidity}); resetting lastUid`,
         );
       }
-      state = {
+      folder = {
         uidValidity,
         lastUid: 0,
-        pendingUid: state.pendingUid,
+        pendingUid: folder.pendingUid,
         failed: {},
       };
-      this.state.save(state);
+      this.saveFolder(kind, folder);
     }
 
-    if (state.pendingUid !== undefined) {
-      await this.resolvePending(state);
-      state = this.state.load();
+    if (folder.pendingUid !== undefined) {
+      await this.resolvePending(kind);
+      folder = this.loadFolder(kind);
     }
 
-    await this.retryFailed(uidValidity);
+    await this.retryFailed(kind, uidValidity);
 
-    const messages = await this.source.fetchFrom(state.lastUid + 1);
+    const messages = await this.source.fetchFrom(folder.lastUid + 1);
     for (const message of messages) {
       try {
-        await this.processOne(message, uidValidity);
+        await this.processOne(kind, message, uidValidity);
       } catch (err) {
-        await this.recordFailure(message, uidValidity, err);
+        await this.recordFailure(kind, message, uidValidity, err);
       }
     }
   }
 
-  private async resolvePending(state: RelayState): Promise<void> {
-    const pendingUid = state.pendingUid;
+  private async resolvePending(kind: FolderKind): Promise<void> {
+    let folder = this.loadFolder(kind);
+    const pendingUid = folder.pendingUid;
     if (pendingUid === undefined) return;
 
     const stillInSource = await this.source.hasUid(pendingUid);
     if (!stillInSource) {
-      this.state.save({
-        ...state,
-        lastUid: Math.max(state.lastUid, pendingUid),
+      this.saveFolder(kind, {
+        ...folder,
+        lastUid: Math.max(folder.lastUid, pendingUid),
         pendingUid: undefined,
       });
-      console.log(`[relay] pending uid ${pendingUid} already deleted from source`);
+      console.log(`[relay] ${kind} pending uid ${pendingUid} already deleted from source`);
       return;
     }
 
     const message = await this.source.fetchOne(pendingUid);
     if (!message) {
-      this.state.save({ ...state, pendingUid: undefined });
+      this.saveFolder(kind, { ...folder, pendingUid: undefined });
       return;
     }
 
-    if (message.isSpam && this.spamAction === 'skip') {
+    const treatAsSpam = this.isSourceSpam(kind) || message.isSpam;
+    if (treatAsSpam && this.spamAction === 'skip') {
       await this.source.deleteMessage(message.uid);
-      const next: RelayState = {
-        ...state,
-        lastUid: Math.max(state.lastUid, pendingUid),
+      this.saveFolder(kind, {
+        ...folder,
+        lastUid: Math.max(folder.lastUid, pendingUid),
         pendingUid: undefined,
-      };
-      this.state.save(next);
-      console.log(`[relay] skipped spam uid=${pendingUid} (deleted from source)`);
+      });
+      this.clearFailed(kind, message.uid);
+      console.log(`[relay] ${kind} skipped spam uid=${pendingUid} (deleted from source)`);
       return;
     }
 
     const inGmail = await this.sink.hasMessageId(message.messageId);
     if (inGmail) {
       await this.source.deleteMessage(message.uid);
-      const next: RelayState = {
-        ...state,
-        lastUid: Math.max(state.lastUid, pendingUid),
+      this.saveFolder(kind, {
+        ...folder,
+        lastUid: Math.max(folder.lastUid, pendingUid),
         pendingUid: undefined,
-      };
-      this.state.save(next);
-      this.clearFailed(message.uid);
-      await this.ntfy.notify(message.from, message.subject);
-      console.log(`[relay] recovered pending uid ${pendingUid} (was already in Gmail)`);
+      });
+      this.clearFailed(kind, message.uid);
+      if (this.shouldNotify(kind, message)) {
+        await this.ntfy.notify(message.from, message.subject);
+      }
+      console.log(
+        `[relay] ${kind} recovered pending uid ${pendingUid} (was already in Gmail)`,
+      );
       return;
     }
 
-    this.state.save({ ...state, pendingUid: undefined });
-    console.log(`[relay] pending uid ${pendingUid} not in Gmail; will re-process`);
+    this.saveFolder(kind, { ...folder, pendingUid: undefined });
+    console.log(
+      `[relay] ${kind} pending uid ${pendingUid} not in Gmail; will re-process`,
+    );
   }
 
-  private async retryFailed(uidValidity: number): Promise<void> {
-    const state = this.state.load();
-    const failed = state.failed ?? {};
+  private async retryFailed(kind: FolderKind, uidValidity: number): Promise<void> {
+    const folder = this.loadFolder(kind);
+    const failed = folder.failed ?? {};
     const uids = Object.keys(failed)
       .map(Number)
       .filter((uid) => Number.isFinite(uid))
@@ -145,85 +215,88 @@ export class Relay {
     for (const uid of uids) {
       const message = await this.source.fetchOne(uid);
       if (!message) {
-        this.clearFailed(uid);
-        console.log(`[relay] failed uid ${uid} no longer on source; dropping`);
+        this.clearFailed(kind, uid);
+        console.log(`[relay] ${kind} failed uid ${uid} no longer on source; dropping`);
         continue;
       }
 
       try {
-        if (message.isSpam && this.spamAction === 'skip') {
+        const treatAsSpam = this.isSourceSpam(kind) || message.isSpam;
+        if (treatAsSpam && this.spamAction === 'skip') {
           await this.source.deleteMessage(uid);
-          this.clearFailed(uid);
-          this.advanceLastUid(uidValidity, uid);
-          console.log(`[relay] skipped spam uid=${uid} on retry`);
+          this.clearFailed(kind, uid);
+          this.advanceLastUid(kind, uidValidity, uid);
+          console.log(`[relay] ${kind} skipped spam uid=${uid} on retry`);
           continue;
         }
 
         if (message.messageId && (await this.sink.hasMessageId(message.messageId))) {
           await this.source.deleteMessage(uid);
-          this.clearFailed(uid);
-          this.advanceLastUid(uidValidity, uid);
-          await this.ntfy.notify(message.from, message.subject);
-          console.log(`[relay] failed uid ${uid} already in Gmail; cleaned up`);
+          this.clearFailed(kind, uid);
+          this.advanceLastUid(kind, uidValidity, uid);
+          if (this.shouldNotify(kind, message)) {
+            await this.ntfy.notify(message.from, message.subject);
+          }
+          console.log(`[relay] ${kind} failed uid ${uid} already in Gmail; cleaned up`);
           continue;
         }
 
-        const folder = this.gmailFolderFor(message);
-        await this.sink.append(message.raw, folder);
+        const gmailFolder = this.gmailFolderFor(kind, message);
+        await this.sink.append(message.raw, gmailFolder);
         await this.source.deleteMessage(uid);
-        this.clearFailed(uid);
-        this.advanceLastUid(uidValidity, uid);
-        const spamNote = message.isSpam ? ' (spam)' : '';
+        this.clearFailed(kind, uid);
+        this.advanceLastUid(kind, uidValidity, uid);
+        const spamNote = treatAsSpam ? ' (spam)' : '';
         console.log(
-          `[relay] delivered previously failed uid=${uid}${spamNote} folder=${folder} subject="${message.subject}"`,
+          `[relay] ${kind} delivered previously failed uid=${uid}${spamNote} folder=${gmailFolder} subject="${message.subject}"`,
         );
-        if (!(message.isSpam && this.spamAction !== 'inbox')) {
+        if (this.shouldNotify(kind, message)) {
           await this.ntfy.notify(message.from, message.subject);
         }
       } catch (err) {
-        await this.recordFailure(message, uidValidity, err);
+        await this.recordFailure(kind, message, uidValidity, err);
       }
     }
   }
 
-  private gmailFolderFor(message: SourceMessage): string {
+  private gmailFolderFor(kind: FolderKind, message: SourceMessage): string {
+    if (this.isSourceSpam(kind)) return '[Gmail]/Spam';
     if (!message.isSpam || this.spamAction === 'inbox') return 'INBOX';
     return '[Gmail]/Spam';
   }
 
-  private async processOne(message: SourceMessage, uidValidity: number): Promise<void> {
-    const before = this.state.load();
+  private async processOne(
+    kind: FolderKind,
+    message: SourceMessage,
+    uidValidity: number,
+  ): Promise<void> {
+    const before = this.loadFolder(kind);
+    const treatAsSpam = this.isSourceSpam(kind) || message.isSpam;
 
-    if (message.isSpam && this.spamAction === 'skip') {
-      const markedSkip: RelayState = {
-        uidValidity,
+    if (treatAsSpam && this.spamAction === 'skip') {
+      this.saveFolder(kind, {
+        ...before,
         lastUid: before.lastUid,
         pendingUid: message.uid,
-        failed: before.failed,
-      };
-      this.state.save(markedSkip);
+      });
       await this.source.deleteMessage(message.uid);
-      const afterSkip: RelayState = {
-        uidValidity,
+      this.saveFolder(kind, {
+        ...before,
         lastUid: Math.max(before.lastUid, message.uid),
         pendingUid: undefined,
-        failed: before.failed,
-      };
-      this.state.save(afterSkip);
-      this.clearFailed(message.uid);
-      console.log(`[relay] skipped spam uid=${message.uid} subject="${message.subject}"`);
+      });
+      this.clearFailed(kind, message.uid);
+      console.log(`[relay] ${kind} skipped spam uid=${message.uid} subject="${message.subject}"`);
       return;
     }
 
-    const marked: RelayState = {
-      uidValidity,
+    this.saveFolder(kind, {
+      ...before,
       lastUid: before.lastUid,
       pendingUid: message.uid,
-      failed: before.failed,
-    };
-    this.state.save(marked);
+    });
 
-    const folder = this.gmailFolderFor(message);
+    const folder = this.gmailFolderFor(kind, message);
     try {
       await this.sink.append(message.raw, folder);
     } catch (err) {
@@ -246,7 +319,7 @@ export class Relay {
         );
       }
       if (!rollbackOk) {
-        await this.recordFailure(message, uidValidity, err, { keepPending: true });
+        await this.recordFailure(kind, message, uidValidity, err, { keepPending: true });
         return;
       }
       throw new Error(
@@ -254,54 +327,55 @@ export class Relay {
       );
     }
 
-    const after: RelayState = {
-      uidValidity,
+    this.saveFolder(kind, {
+      ...before,
       lastUid: Math.max(before.lastUid, message.uid),
       pendingUid: undefined,
-      failed: before.failed,
-    };
-    this.state.save(after);
-    this.clearFailed(message.uid);
-    const spamNote = message.isSpam ? ' (spam)' : '';
+    });
+    this.clearFailed(kind, message.uid);
+    const spamNote = treatAsSpam ? ' (spam)' : '';
     console.log(
-      `[relay] delivered uid=${message.uid}${spamNote} folder=${folder} subject="${message.subject}"`,
+      `[relay] ${kind} delivered uid=${message.uid}${spamNote} folder=${folder} subject="${message.subject}"`,
     );
-    if (!(message.isSpam && this.spamAction !== 'inbox')) {
+    if (this.shouldNotify(kind, message)) {
       await this.ntfy.notify(message.from, message.subject);
     }
   }
 
   private async recordFailure(
+    kind: FolderKind,
     message: SourceMessage,
     uidValidity: number,
     error: unknown,
     opts: { keepPending?: boolean } = {},
   ): Promise<void> {
     const errMsg = error instanceof Error ? error.message : String(error);
-    const state = this.state.load();
-    const failed: Record<string, FailedEntry> = { ...(state.failed ?? {}) };
+    const folder = this.loadFolder(kind);
+    const failed: Record<string, FailedEntry> = { ...(folder.failed ?? {}) };
     const key = String(message.uid);
     const prev = failed[key] ?? { attempts: 0, reported: false };
     const attempts = prev.attempts + 1;
     let reported = prev.reported;
 
     if (attempts >= MAX_FAIL_ATTEMPTS && !reported) {
-      reported = await this.sendFailureNotice(message, attempts, errMsg);
+      reported = await this.sendFailureNotice(kind, message, attempts, errMsg);
     }
 
     failed[key] = { attempts, reported };
-    this.state.save({
+    this.saveFolder(kind, {
+      ...folder,
       uidValidity,
-      lastUid: Math.max(state.lastUid, message.uid),
+      lastUid: Math.max(folder.lastUid, message.uid),
       pendingUid: opts.keepPending ? message.uid : undefined,
       failed,
     });
     console.error(
-      `[relay] delivery failed uid=${message.uid} attempt=${attempts}/${MAX_FAIL_ATTEMPTS}: ${errMsg}`,
+      `[relay] ${kind} delivery failed uid=${message.uid} attempt=${attempts}/${MAX_FAIL_ATTEMPTS}: ${errMsg}`,
     );
   }
 
   private async sendFailureNotice(
+    kind: FolderKind,
     message: SourceMessage,
     attempts: number,
     error: string,
@@ -313,12 +387,13 @@ export class Relay {
         `To: ${this.noticeFrom}`,
         `Subject: [imap2gmail] not delivered: ${subject}`,
         `Date: ${new Date().toUTCString()}`,
-        `Message-ID: <imap2gmail-fail-${message.uid}-${Date.now()}@imap2gmail>`,
+        `Message-ID: <imap2gmail-fail-${kind}-${message.uid}-${Date.now()}@imap2gmail>`,
         'MIME-Version: 1.0',
         'Content-Type: text/plain; charset=utf-8',
         '',
         'imap2gmail could not deliver a message.',
         '',
+        `Folder: ${this.mailboxPath(kind)}`,
         `UID: ${message.uid}`,
         `From: ${message.from || '(unknown)'}`,
         `Subject: ${subject}`,
@@ -331,32 +406,34 @@ export class Relay {
       ];
       const raw = Buffer.from(lines.join('\r\n'), 'utf8');
       await this.sink.append(raw, 'INBOX');
-      console.log(`[relay] one-time failure notice for uid=${message.uid} appended to Gmail`);
+      console.log(
+        `[relay] ${kind} one-time failure notice for uid=${message.uid} appended to Gmail`,
+      );
       return true;
     } catch (err) {
       console.error(
-        `[relay] failure notice failed for uid=${message.uid}:`,
+        `[relay] ${kind} failure notice failed for uid=${message.uid}:`,
         err instanceof Error ? err.message : err,
       );
       return false;
     }
   }
 
-  private clearFailed(uid: number): void {
-    const state = this.state.load();
-    const failed = { ...(state.failed ?? {}) };
+  private clearFailed(kind: FolderKind, uid: number): void {
+    const folder = this.loadFolder(kind);
+    const failed = { ...(folder.failed ?? {}) };
     const key = String(uid);
     if (!(key in failed)) return;
     delete failed[key];
-    this.state.save({ ...state, failed });
+    this.saveFolder(kind, { ...folder, failed });
   }
 
-  private advanceLastUid(uidValidity: number, uid: number): void {
-    const state = this.state.load();
-    this.state.save({
-      ...state,
+  private advanceLastUid(kind: FolderKind, uidValidity: number, uid: number): void {
+    const folder = this.loadFolder(kind);
+    this.saveFolder(kind, {
+      ...folder,
       uidValidity,
-      lastUid: Math.max(state.lastUid, uid),
+      lastUid: Math.max(folder.lastUid, uid),
       pendingUid: undefined,
     });
   }

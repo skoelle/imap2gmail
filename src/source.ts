@@ -24,6 +24,7 @@ type MailboxLock = { release: () => void };
 export class Source {
   private readonly client: ImapFlow;
   private lock: MailboxLock | null = null;
+  private selectedPath: string | null = null;
 
   constructor(cfg: ImapAccountConfig) {
     this.client = new ImapFlow({
@@ -71,15 +72,30 @@ export class Source {
     await this.connect();
   }
 
-  async selectInbox(): Promise<void> {
+  async selectMailbox(path: string): Promise<void> {
     await this.ensureConnected();
-    if (this.lock) return;
-    this.lock = await this.client.getMailboxLock('INBOX');
+    if (this.lock && this.selectedPath === path) return;
+    if (this.lock) {
+      this.lock.release();
+      this.lock = null;
+      this.selectedPath = null;
+    }
+    this.lock = await this.client.getMailboxLock(path);
+    this.selectedPath = path;
+  }
+
+  async selectInbox(): Promise<void> {
+    await this.selectMailbox('INBOX');
+  }
+
+  releaseMailbox(): void {
+    this.lock?.release();
+    this.lock = null;
+    this.selectedPath = null;
   }
 
   releaseInbox(): void {
-    this.lock?.release();
-    this.lock = null;
+    this.releaseMailbox();
   }
 
   async fetchFrom(minUid: number): Promise<SourceMessage[]> {
@@ -112,7 +128,7 @@ export class Source {
 
   async logout(): Promise<void> {
     try {
-      this.releaseInbox();
+      this.releaseMailbox();
       if (this.client.usable) {
         await this.client.logout();
       }

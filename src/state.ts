@@ -8,13 +8,19 @@ export interface FailedEntry {
   reported: boolean;
 }
 
-export interface RelayState {
+/** Per-mailbox delivery cursor (UIDs are scoped to one mailbox). */
+export interface FolderState {
   uidValidity: number;
   lastUid: number;
   /** UID where Append succeeded but source-delete is not confirmed yet. */
   pendingUid?: number;
   /** Delivery failures still retried on the source (key = UID). */
   failed?: Record<string, FailedEntry>;
+}
+
+/** Top-level fields = INBOX; optional `spam` = source spam folder. */
+export interface RelayState extends FolderState {
+  spam?: FolderState;
 }
 
 const EMPTY_STATE: RelayState = { uidValidity: 0, lastUid: 0 };
@@ -33,6 +39,21 @@ function parseFailed(raw: unknown): Record<string, FailedEntry> {
   return out;
 }
 
+function parseFolder(raw: unknown): FolderState | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const parsed = raw as Partial<FolderState>;
+  const pending =
+    parsed.pendingUid === undefined || parsed.pendingUid === null
+      ? undefined
+      : Number(parsed.pendingUid);
+  return {
+    uidValidity: Number(parsed.uidValidity ?? 0),
+    lastUid: Number(parsed.lastUid ?? 0),
+    pendingUid: pending,
+    failed: parseFailed(parsed.failed),
+  };
+}
+
 export class StateStore {
   constructor(private readonly filePath: string) {}
 
@@ -40,6 +61,7 @@ export class StateStore {
     try {
       const raw = readFileSync(this.filePath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<RelayState>;
+      const spam = parseFolder(parsed.spam);
       return {
         uidValidity: Number(parsed.uidValidity ?? 0),
         lastUid: Number(parsed.lastUid ?? 0),
@@ -48,6 +70,7 @@ export class StateStore {
             ? undefined
             : Number(parsed.pendingUid),
         failed: parseFailed(parsed.failed),
+        ...(spam ? { spam } : {}),
       };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
