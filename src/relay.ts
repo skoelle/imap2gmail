@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
+import type { SpamAction } from './config.js';
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
@@ -14,6 +15,7 @@ export class Relay {
     private readonly sink: Sink,
     private readonly state: StateStore,
     private readonly ntfy: Ntfy,
+    private readonly spamAction: SpamAction = 'gmail-spam',
   ) {}
 
   async catchUp(): Promise<void> {
@@ -90,6 +92,18 @@ export class Relay {
       return;
     }
 
+    if (message.isSpam && this.spamAction === 'skip') {
+      await this.source.deleteMessage(message.uid);
+      const next: RelayState = {
+        ...state,
+        lastUid: Math.max(state.lastUid, pendingUid),
+        pendingUid: undefined,
+      };
+      this.state.save(next);
+      console.log(`[relay] skipped spam uid=${pendingUid} (deleted from source)`);
+      return;
+    }
+
     const inGmail = await this.sink.hasMessageId(message.messageId);
     if (inGmail) {
       await this.source.deleteMessage(message.uid);
@@ -108,8 +122,39 @@ export class Relay {
     console.log(`[relay] pending uid ${pendingUid} not in Gmail; will re-process`);
   }
 
+  private gmailFolderFor(message: SourceMessage): string {
+    if (!message.isSpam || this.spamAction === 'inbox') return 'INBOX';
+    return '[Gmail]/Spam';
+  }
+
   private async processOne(message: SourceMessage, uidValidity: number): Promise<void> {
     const before = this.state.load();
+
+    if (message.isSpam && this.spamAction === 'skip') {
+      const markedSkip: RelayState = {
+        uidValidity,
+        lastUid: before.lastUid,
+        pendingUid: message.uid,
+      };
+      this.state.save(markedSkip);
+      try {
+        await this.source.deleteMessage(message.uid);
+      } catch (err) {
+        this.state.save({ uidValidity, lastUid: before.lastUid, pendingUid: undefined });
+        throw new Error(
+          `Source delete failed for spam uid ${message.uid}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+      const afterSkip: RelayState = {
+        uidValidity,
+        lastUid: Math.max(before.lastUid, message.uid),
+        pendingUid: undefined,
+      };
+      this.state.save(afterSkip);
+      console.log(`[relay] skipped spam uid=${message.uid} subject="${message.subject}"`);
+      return;
+    }
+
     const marked: RelayState = {
       uidValidity,
       lastUid: before.lastUid,
@@ -117,8 +162,9 @@ export class Relay {
     };
     this.state.save(marked);
 
+    const folder = this.gmailFolderFor(message);
     try {
-      await this.sink.append(message.raw);
+      await this.sink.append(message.raw, folder);
     } catch (err) {
       this.state.save({ uidValidity, lastUid: before.lastUid, pendingUid: undefined });
       throw new Error(
@@ -149,7 +195,12 @@ export class Relay {
       pendingUid: undefined,
     };
     this.state.save(after);
-    console.log(`[relay] delivered uid=${message.uid} subject="${message.subject}"`);
-    await this.ntfy.notify(message.from, message.subject);
+    const spamNote = message.isSpam ? ' (spam)' : '';
+    console.log(
+      `[relay] delivered uid=${message.uid}${spamNote} folder=${folder} subject="${message.subject}"`,
+    );
+    if (!(message.isSpam && this.spamAction !== 'inbox')) {
+      await this.ntfy.notify(message.from, message.subject);
+    }
   }
 }

@@ -31,7 +31,8 @@
 1. 📡 Connect to source, select INBOX, compare `uidValidity` against state
 2. 🧹 Catch-up: fetch all `uid > lastUid` as raw RFC822 buffers
 3. 📨 Per message:
-   - ✉️ Gmail `append(INBOX, raw)`
+   - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to Gmail Spam, skip ntfy
+   - ✉️ Gmail `append(INBOX or [Gmail]/Spam, raw)`
    - 🗑️ Source UID `\Deleted` + expunge
    - ❌ Append failed → do not advance state, retry
    - ⚠️ Delete failed after successful append → Gmail rollback (search by Message-ID and expunge)
@@ -40,6 +41,18 @@
 5. ⏱️ Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
 6. 🔌 Reconnect: imapflow recovery + own catch-up
 7. 🚨 Crash window Append↔Delete: `pendingUid` in state → targeted recovery on startup
+
+### 🛡️ Spam handling
+
+Source headers `X-Spam-Flag`, `X-Spam-Status`, `X-UI-Filterresults` are checked:
+
+| `SPAM__ACTION` | Behavior |
+|---|---|
+| `gmail-spam` *(default)* | Append to Gmail `[Gmail]/Spam`, no ntfy, still delete source |
+| `inbox` | Append to Gmail `INBOX` as usual (log only) |
+| `skip` | Do not append to Gmail; delete from source |
+
+💡 Tip: prefer provider-side spam folders *(e.g. 1und1/IONOS → move to Spam)* so spam never reaches this relay.
 
 ### 🗃️ State (`/data/state.json`)
 
@@ -79,6 +92,7 @@ cp .env.example .env
 | `GMAIL__HOST/PORT` | 🌐 Default `imap.gmail.com:993` |
 | `NTFY__TOPIC_URL` | 🔔 e.g. `https://ntfy.sh/my-topic`; empty = off |
 | `NTFY__BLACKLIST` | 🤫 From addresses without ntfy *(comma-separated)*, e.g. `user@example.org` |
+| `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |
 | `STATE_FILE` | 🗃️ Default `/data/state.json` |
 
@@ -158,9 +172,9 @@ imap2gmail/
 │   ├── index.ts     # 🚪 Entry, main loop, shutdown
 │   ├── config.ts    # ⚙️ Env vars
 │   ├── state.ts     # 🗃️ JSON state read/write
-│   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete
-│   ├── sink.ts      # 📤 imapflow Gmail: append, rollback
-│   ├── relay.ts     # 🔄 Catch-up, pending-UID, errors/rollback, ntfy
+│   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete, spam header
+│   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/Spam), rollback
+│   ├── relay.ts     # 🔄 Catch-up, pending-UID, spam action, errors/rollback, ntfy
 │   └── ntfy.ts      # 🔔 HTTP-POST *(empty URL = off)*
 ├── 🐳 Dockerfile
 ├── 🐳 docker-compose.yml

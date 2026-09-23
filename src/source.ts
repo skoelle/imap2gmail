@@ -16,6 +16,7 @@ export interface SourceMessage {
   messageId: string;
   from: string;
   subject: string;
+  isSpam: boolean;
 }
 
 type MailboxLock = { release: () => void };
@@ -130,6 +131,7 @@ function toSourceMessage(msg: FetchMessageObject): SourceMessage {
     messageId: headers.messageId,
     from: headers.from,
     subject: headers.subject,
+    isSpam: headers.isSpam,
   };
 }
 
@@ -137,6 +139,7 @@ interface ParsedHeaders {
   messageId: string;
   from: string;
   subject: string;
+  isSpam: boolean;
 }
 
 function parseHeaders(raw: Buffer): ParsedHeaders {
@@ -156,7 +159,18 @@ function parseHeaders(raw: Buffer): ParsedHeaders {
     messageId: decodeMimeWords(stripAngles(map.get('message-id') ?? '')),
     from: decodeMimeWords(map.get('from') ?? ''),
     subject: decodeMimeWords(map.get('subject') ?? ''),
+    isSpam: isSpamMessage(map),
   };
+}
+
+function isSpamMessage(headers: Map<string, string>): boolean {
+  const flag = (headers.get('x-spam-flag') ?? '').toLowerCase();
+  if (flag === 'yes' || flag === 'true') return true;
+  const status = (headers.get('x-spam-status') ?? '').toLowerCase();
+  if (status.startsWith('yes')) return true;
+  const ui = (headers.get('x-ui-filterresults') ?? '').toLowerCase();
+  if (ui.includes('junk') || ui.includes('spam')) return true;
+  return false;
 }
 
 function stripAngles(value: string): string {

@@ -7,11 +7,14 @@ export interface ImapAccountConfig {
   password: string;
 }
 
+export type SpamAction = 'gmail-spam' | 'inbox' | 'skip';
+
 export interface AppConfig {
   source: ImapAccountConfig;
   gmail: ImapAccountConfig;
   ntfyTopicUrl: string;
   ntfyBlacklist: string[];
+  spamAction: SpamAction;
   fallbackPollSeconds: number;
   stateFile: string;
 }
@@ -64,7 +67,14 @@ export function loadConfig(): AppConfig {
     },
     ntfyTopicUrl: optionalEnv('NTFY__TOPIC_URL', ''),
     ntfyBlacklist: listEnv('NTFY__BLACKLIST'),
+    spamAction: spamActionEnv(),
     fallbackPollSeconds: intEnv('FALLBACK_POLL_SECONDS', 60),
     stateFile: optionalEnv('STATE_FILE', '/data/state.json'),
   };
+}
+
+function spamActionEnv(): SpamAction {
+  const raw = optionalEnv('SPAM__ACTION', 'gmail-spam').toLowerCase();
+  if (raw === 'gmail-spam' || raw === 'inbox' || raw === 'skip') return raw;
+  throw new Error(`Invalid SPAM__ACTION: ${raw} (expected gmail-spam|inbox|skip)`);
 }

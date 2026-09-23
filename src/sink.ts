@@ -36,10 +36,10 @@ export class Sink {
     await this.connect();
   }
 
-  async append(raw: Buffer): Promise<void> {
+  async append(raw: Buffer, folder = 'INBOX'): Promise<void> {
     await this.ensureConnected();
     // No \Seen: delivered mails must stay unread in Gmail.
-    const result = await this.client.append('INBOX', raw, []);
+    const result = await this.client.append(folder, raw, []);
     if (result === false) {
       throw new Error('Gmail APPEND did not run (connection not ready)');
     }
