@@ -29,7 +29,7 @@ export class Ntfy {
       console.log(`[ntfy] skipped (blacklist): ${from}`);
       return;
     }
-    const line = `${from || '(unbekannt)'} – ${subject || '(ohne Betreff)'}`;
+    const line = `${from || '(unknown)'} – ${subject || '(no subject)'}`;
     try {
       const res = await fetch(this.topicUrl, {
         method: 'POST',
