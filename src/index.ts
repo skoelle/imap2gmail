@@ -1,5 +1,6 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
+import { createServer } from 'node:http';
 import { loadConfig } from './config.js';
 import { Ntfy } from './ntfy.js';
 import { Relay } from './relay.js';
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   let shuttingDown = false;
   let problemSince: number | null = null;
   let problemNotified = false;
+  let lastSuccessAt: number | null = null;
   const alertMs = config.reconnectAlertSeconds * 1000;
 
   const noteConnectionFailure = (err: unknown): void => {
@@ -49,6 +51,7 @@ async function main(): Promise<void> {
 
   /** Only a full catch-up (source + Gmail) proves both links are healthy. */
   const noteConnectionSuccess = (): void => {
+    lastSuccessAt = Date.now();
     problemSince = null;
     if (!problemNotified) return;
     problemNotified = false;
@@ -81,6 +84,24 @@ async function main(): Promise<void> {
   const pollTimer = setInterval(() => {
     void trigger('fallback-poll');
   }, pollMs);
+
+  if (config.healthPort > 0) {
+    const staleMs = config.healthStaleSeconds * 1000;
+    const healthServer = createServer((req, res) => {
+      const ageMs = lastSuccessAt === null ? null : Date.now() - lastSuccessAt;
+      const ok = ageMs !== null && ageMs <= staleMs;
+      res.writeHead(ok ? 200 : 503, { 'Content-Type': 'application/json' });
+      res.end(
+        `${JSON.stringify({
+          ok,
+          lastSuccessAgeSeconds: ageMs === null ? null : Math.round(ageMs / 1000),
+        })}\n`,
+      );
+    });
+    healthServer.listen(config.healthPort, () => {
+      console.log(`[main] health endpoint on :${config.healthPort}/healthz`);
+    });
+  }
 
   await trigger('startup');
 

@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 export interface FailedEntry {
@@ -57,9 +57,9 @@ function parseFolder(raw: unknown): FolderState | undefined {
 export class StateStore {
   constructor(private readonly filePath: string) {}
 
-  load(): RelayState {
+  async load(): Promise<RelayState> {
     try {
-      const raw = readFileSync(this.filePath, 'utf8');
+      const raw = await readFile(this.filePath, 'utf8');
       const parsed = JSON.parse(raw) as Partial<RelayState>;
       const spam = parseFolder(parsed.spam);
       return {
@@ -79,10 +79,11 @@ export class StateStore {
     }
   }
 
-  save(state: RelayState): void {
-    mkdirSync(dirname(this.filePath), { recursive: true });
+  /** Atomic tmp+rename write; never partially overwrites the state file. */
+  async save(state: RelayState): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true });
     const tmp = `${this.filePath}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-    renameSync(tmp, this.filePath);
+    await writeFile(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await rename(tmp, this.filePath);
   }
 }

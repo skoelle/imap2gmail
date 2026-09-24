@@ -129,19 +129,18 @@ export class Source {
     this.releaseMailbox();
   }
 
-  async fetchFrom(minUid: number): Promise<SourceMessage[]> {
+  /** Fetch messages from `minUid`; optional `limit` bounds the batch (memory). */
+  async fetchFrom(minUid: number, limit?: number): Promise<SourceMessage[]> {
     const start = Math.max(1, minUid);
-    const messages: SourceMessage[] = [];
-    for await (const msg of await this.run(async (client) => {
-      const out: FetchMessageObject[] = [];
+    return await this.run(async (client) => {
+      const messages: SourceMessage[] = [];
+      // imapflow handles an early break: its generator finally drains backpressure.
       for await (const m of client.fetch(`${start}:*`, { source: true }, { uid: true })) {
-        out.push(m);
+        messages.push(toSourceMessage(m));
+        if (limit !== undefined && messages.length >= limit) break;
       }
-      return out;
-    })) {
-      messages.push(toSourceMessage(msg));
-    }
-    return messages;
+      return messages;
+    });
   }
 
   async fetchOne(uid: number): Promise<SourceMessage | null> {

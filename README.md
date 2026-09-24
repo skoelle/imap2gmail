@@ -157,6 +157,7 @@ cp .env.example .env
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |
 | `RECONNECT__ALERT_SECONDS` | ⚠️ ntfy after sustained reconnect failure; default `3600` (1h), once per container + recovery |
 | `IDLE__TIMEOUT_SECONDS` | ⏱️ Hard cap per IDLE wait (default `600`); on expiry the source client is rebuilt |
+| `HEALTH__PORT` / `HEALTH__STALE_SECONDS` | 🩺 Optional health endpoint `:PORT/healthz` (unset = off); `200` while last full catch-up is younger than stale (default `900`s), else `503` |
 | `STATE_FILE` | 🗃️ Default `/data/state.json` |
 
 ### 4️⃣ 🚀 Start

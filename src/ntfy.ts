@@ -51,6 +51,8 @@ export class Ntfy {
           Tags: tags,
           Priority: 'urgent',
         },
+        // Native fetch has no default timeout; a hung POST must not stall the relay.
+        signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) {
         console.warn(`[ntfy] HTTP ${res.status} for POST ${this.topicUrl}`);

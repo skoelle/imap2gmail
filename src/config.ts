@@ -27,6 +27,8 @@ export interface AppConfig {
   fallbackPollSeconds: number;
   reconnectAlertSeconds: number;
   idleTimeoutSeconds: number;
+  healthPort: number;
+  healthStaleSeconds: number;
   stateFile: string;
 }
 
@@ -84,6 +86,8 @@ export function loadConfig(): AppConfig {
     fallbackPollSeconds: intEnv('FALLBACK_POLL_SECONDS', 60),
     reconnectAlertSeconds: intEnv('RECONNECT__ALERT_SECONDS', 3600),
     idleTimeoutSeconds: intEnv('IDLE__TIMEOUT_SECONDS', 600),
+    healthPort: intEnv('HEALTH__PORT', 0),
+    healthStaleSeconds: intEnv('HEALTH__STALE_SECONDS', 900),
     stateFile: optionalEnv('STATE_FILE', '/data/state.json'),
   };
 }
