@@ -9,6 +9,7 @@ import {
   type MailboxObject,
 } from 'imapflow';
 import type { ImapAccountConfig } from './config.js';
+import { isConnectionGone } from './errors.js';
 
 export interface SourceMessage {
   uid: number;
@@ -105,7 +106,7 @@ export class Source {
       this.lock = null;
       this.selectedPath = null;
     }
-    this.lock = await this.client.getMailboxLock(path);
+    this.lock = await this.run((client) => client.getMailboxLock(path));
     this.selectedPath = path;
   }
 
@@ -131,25 +132,33 @@ export class Source {
   async fetchFrom(minUid: number): Promise<SourceMessage[]> {
     const start = Math.max(1, minUid);
     const messages: SourceMessage[] = [];
-    for await (const msg of this.client.fetch(`${start}:*`, { source: true }, { uid: true })) {
+    for await (const msg of await this.run(async (client) => {
+      const out: FetchMessageObject[] = [];
+      for await (const m of client.fetch(`${start}:*`, { source: true }, { uid: true })) {
+        out.push(m);
+      }
+      return out;
+    })) {
       messages.push(toSourceMessage(msg));
     }
     return messages;
   }
 
   async fetchOne(uid: number): Promise<SourceMessage | null> {
-    const msg = await this.client.fetchOne(uid, { source: true }, { uid: true });
+    const msg = await this.run((client) =>
+      client.fetchOne(uid, { source: true }, { uid: true }),
+    );
     if (!msg || !msg.source) return null;
     return toSourceMessage(msg);
   }
 
   async hasUid(uid: number): Promise<boolean> {
-    const msg = await this.client.fetchOne(uid, { uid: true }, { uid: true });
+    const msg = await this.run((client) => client.fetchOne(uid, { uid: true }, { uid: true }));
     return Boolean(msg);
   }
 
   async deleteMessage(uid: number): Promise<void> {
-    await this.client.messageDelete(uid, { uid: true });
+    await this.run((client) => client.messageDelete(uid, { uid: true }));
   }
 
   async idle(): Promise<void> {
@@ -186,11 +195,37 @@ export class Source {
   }
 
   private replaceClient(): void {
+    this.releaseMailbox();
+    const old = this.client;
     this.client = this.createClient();
+    this.clientConnectCalled = false;
+    this.connecting = null;
+    try {
+      old.close();
+    } catch {
+      // ignore close on already dead client
+    }
   }
 
   private resetMailbox(): void {
     this.releaseMailbox();
+  }
+
+  /** Run one IMAP op; on gone connection rebuild the client and retry once. */
+  private async run<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+    try {
+      await this.ensureConnected();
+      return await fn(this.client);
+    } catch (err) {
+      if (!isConnectionGone(err)) throw err;
+      console.warn(
+        '[source] connection lost, rebuilding client:',
+        err instanceof Error ? err.message : err,
+      );
+      this.replaceClient();
+      await this.ensureConnected();
+      return await fn(this.client);
+    }
   }
 }
 

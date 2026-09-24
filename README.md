@@ -44,8 +44,9 @@
 4. 😴 IDLE: imapflow auto-IDLE; `exists` event → catch-up
 5. ⏱️ Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
 6. 🔌 Reconnect: **new ImapFlow instance** (single-use) + backoff (3s → 60s) + catch-up  
-   - ⚠️ After `RECONNECT__ALERT_SECONDS` (default 1h) continuous failure → **one** ntfy per container start  
-   - ✅ Successful reconnect after that alert → **one** recovery ntfy
+   - 🔄 Source/Gmail ops rebuild the client once on `Connection not available`  
+   - ⚠️ After `RECONNECT__ALERT_SECONDS` (default 1h) failed catch-up/reconnect → **one** ntfy per container start  
+   - ✅ Full catch-up after that alert → **one** recovery ntfy
 7. 🚨 Crash window Append↔Delete: `pendingUid` in state → targeted recovery on startup
 
 **Recipient frequency** (docker logs only):
@@ -102,7 +103,7 @@ Two independent paths:
 - 📮 After **3 failed attempts** → **one** notice mail to Gmail INBOX  
   `[imap2gmail] not delivered: <subject>` (never repeated for that UID)
 - 📭 No error ntfy pushes for per-mail failures; details stay in `docker compose logs`  
-- ⚠️ **Reconnect** alerts are separate: one system ntfy after `RECONNECT__ALERT_SECONDS`, then one recovery ntfy (not From-Blacklisted)
+- ⚠️ **Connection** alerts: one system ntfy after `RECONNECT__ALERT_SECONDS` of failed catch-up/reconnect (source *or* Gmail), then one recovery ntfy (not From-Blacklisted)
 - 💥 Crash between append↔delete → `pendingUid` recovery (Message-ID check)
 
 ### 🗃️ State (`/data/state.json`)

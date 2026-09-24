@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See LICENSE file in project root for details.
 import { ImapFlow } from 'imapflow';
 import type { ImapAccountConfig } from './config.js';
+import { isConnectionGone } from './errors.js';
 
 export class Sink {
   private readonly cfg: ImapAccountConfig;
@@ -25,7 +26,7 @@ export class Sink {
         // imapflow is single-use: after any disconnect, build a fresh instance.
         if (!this.client.usable) {
           if (this.clientConnectCalled) {
-            this.client = this.createClient();
+            this.replaceClient();
           }
           this.clientConnectCalled = true;
           await this.client.connect();
@@ -45,9 +46,7 @@ export class Sink {
   }
 
   async append(raw: Buffer, folder = 'INBOX'): Promise<void> {
-    await this.ensureConnected();
-    // No \Seen: delivered mails must stay unread in Gmail.
-    const result = await this.client.append(folder, raw, []);
+    const result = await this.run((client) => client.append(folder, raw, []));
     if (result === false) {
       throw new Error('Gmail APPEND did not run (connection not ready)');
     }
@@ -55,23 +54,19 @@ export class Sink {
 
   async hasMessageId(messageId: string): Promise<boolean> {
     if (!messageId) return false;
-    await this.ensureConnected();
-    const uids = await this.client.search(
-      { header: { 'Message-ID': messageId } },
-      { uid: true },
+    const uids = await this.run((client) =>
+      client.search({ header: { 'Message-ID': messageId } }, { uid: true }),
     );
     return Array.isArray(uids) && uids.length > 0;
   }
 
   async deleteByMessageId(messageId: string): Promise<void> {
     if (!messageId) return;
-    await this.ensureConnected();
-    const uids = await this.client.search(
-      { header: { 'Message-ID': messageId } },
-      { uid: true },
+    const uids = await this.run((client) =>
+      client.search({ header: { 'Message-ID': messageId } }, { uid: true }),
     );
     if (Array.isArray(uids) && uids.length > 0) {
-      await this.client.messageDelete(uids, { uid: true });
+      await this.run((client) => client.messageDelete(uids, { uid: true }));
     }
   }
 
@@ -82,6 +77,35 @@ export class Sink {
       }
     } catch {
       // ignore shutdown errors
+    }
+  }
+
+  /** Run one IMAP op; on gone connection rebuild the client and retry once. */
+  private async run<T>(fn: (client: ImapFlow) => Promise<T>): Promise<T> {
+    try {
+      await this.ensureConnected();
+      return await fn(this.client);
+    } catch (err) {
+      if (!isConnectionGone(err)) throw err;
+      console.warn(
+        '[sink] connection lost, rebuilding client:',
+        err instanceof Error ? err.message : err,
+      );
+      this.replaceClient();
+      await this.ensureConnected();
+      return await fn(this.client);
+    }
+  }
+
+  private replaceClient(): void {
+    const old = this.client;
+    this.client = this.createClient();
+    this.clientConnectCalled = false;
+    this.connecting = null;
+    try {
+      old.close();
+    } catch {
+      // ignore close on already dead client
     }
   }
 

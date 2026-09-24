@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
 import type { ArchiveRule, SpamAction } from './config.js';
+import { isConnectionGone } from './errors.js';
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
@@ -13,6 +14,7 @@ type FolderKind = 'inbox' | 'spam';
 export class Relay {
   private busy = false;
   private rerun = false;
+  private connectionLost = false;
 
   constructor(
     private readonly source: Source,
@@ -42,6 +44,7 @@ export class Relay {
   }
 
   private async runOnce(): Promise<void> {
+    this.connectionLost = false;
     await this.source.ensureConnected();
     await this.sink.ensureConnected();
 
@@ -55,8 +58,15 @@ export class Relay {
           `[relay] source spam folder "${this.sourceSpamFolder}" failed:`,
           err instanceof Error ? err.message : err,
         );
+        if (isConnectionGone(err)) this.connectionLost = true;
       }
       await this.source.selectInbox();
+    }
+
+    // Surface dead IMAP links so catch-up fails and the reconnect alert can fire.
+    if (this.connectionLost) {
+      this.connectionLost = false;
+      throw new Error('IMAP connection lost during catch-up');
     }
   }
 
@@ -372,6 +382,7 @@ export class Relay {
     opts: { keepPending?: boolean } = {},
   ): Promise<void> {
     const errMsg = error instanceof Error ? error.message : String(error);
+    if (isConnectionGone(error)) this.connectionLost = true;
     const folder = this.loadFolder(kind);
     const failed: Record<string, FailedEntry> = { ...(folder.failed ?? {}) };
     const key = String(message.uid);
