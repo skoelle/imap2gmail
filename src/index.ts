@@ -90,7 +90,11 @@ async function main(): Promise<void> {
     console.log(`[main] ${signal} received, shutting down…`);
     clearInterval(pollTimer);
     await sleep(100);
-    await Promise.allSettled([source.logout(), sink.logout()]);
+    // Logout can block on a dead socket; force exit after 5s regardless.
+    await Promise.race([
+      Promise.allSettled([source.logout(), sink.logout()]),
+      sleep(5000),
+    ]);
     process.exit(0);
   };
 
@@ -104,9 +108,11 @@ async function main(): Promise<void> {
   const backoffMs = [3000, 5000, 15000, 60000];
   let reconnectAttempt = 0;
 
+  const idleTimeoutMs = config.idleTimeoutSeconds * 1000;
+
   while (!shuttingDown) {
     try {
-      await source.idle();
+      await source.idle(idleTimeoutMs);
       reconnectAttempt = 0;
     } catch (err) {
       if (shuttingDown) break;

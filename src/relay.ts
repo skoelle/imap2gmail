@@ -45,6 +45,7 @@ export class Relay {
 
   private async runOnce(): Promise<void> {
     this.connectionLost = false;
+    const startedAt = Date.now();
     await this.source.ensureConnected();
     await this.sink.ensureConnected();
 
@@ -61,6 +62,11 @@ export class Relay {
         if (isConnectionGone(err)) this.connectionLost = true;
       }
       await this.source.selectInbox();
+    }
+
+    const elapsed = Date.now() - startedAt;
+    if (elapsed > 5 * 60_000) {
+      console.warn(`[relay] catch-up took ${Math.round(elapsed / 1000)}s`);
     }
 
     // Surface dead IMAP links so catch-up fails and the reconnect alert can fire.

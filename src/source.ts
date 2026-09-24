@@ -161,8 +161,29 @@ export class Source {
     await this.run((client) => client.messageDelete(uid, { uid: true }));
   }
 
-  async idle(): Promise<void> {
-    await this.client.idle();
+  async idle(timeoutMs: number): Promise<void> {
+    const idlePromise = this.client.idle();
+    // If the timeout wins the race, close() below rejects this promise; keep it handled.
+    void idlePromise.catch(() => undefined);
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        idlePromise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('IDLE timeout')), timeoutMs);
+        }),
+      ]);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'IDLE timeout') {
+        // Abandoning idle() alone leaves the session running and can make the next
+        // idle() return instantly in a tight loop - rebuild to break it for real.
+        console.warn(`[source] IDLE exceeded ${timeoutMs}ms, rebuilding client`);
+        this.replaceClient();
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async logout(): Promise<void> {

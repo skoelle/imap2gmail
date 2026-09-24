@@ -26,6 +26,7 @@ export interface AppConfig {
   archiveRules: ArchiveRule[];
   fallbackPollSeconds: number;
   reconnectAlertSeconds: number;
+  idleTimeoutSeconds: number;
   stateFile: string;
 }
 
@@ -82,6 +83,7 @@ export function loadConfig(): AppConfig {
     archiveRules: parseArchiveRules(optionalEnv('ARCHIVE__RULES', '')),
     fallbackPollSeconds: intEnv('FALLBACK_POLL_SECONDS', 60),
     reconnectAlertSeconds: intEnv('RECONNECT__ALERT_SECONDS', 3600),
+    idleTimeoutSeconds: intEnv('IDLE__TIMEOUT_SECONDS', 600),
     stateFile: optionalEnv('STATE_FILE', '/data/state.json'),
   };
 }
