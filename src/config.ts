@@ -9,6 +9,12 @@ export interface ImapAccountConfig {
 
 export type SpamAction = 'gmail-spam' | 'inbox' | 'skip';
 
+/** Route to Gmail All Mail when all set fields match (case-insensitive contains). */
+export interface ArchiveRule {
+  subject?: string;
+  from?: string;
+}
+
 export interface AppConfig {
   source: ImapAccountConfig;
   /** Source spam folder path (e.g. "Spam"); empty = disabled. */
@@ -17,6 +23,7 @@ export interface AppConfig {
   ntfyTopicUrl: string;
   ntfyBlacklist: string[];
   spamAction: SpamAction;
+  archiveRules: ArchiveRule[];
   fallbackPollSeconds: number;
   reconnectAlertSeconds: number;
   stateFile: string;
@@ -72,6 +79,7 @@ export function loadConfig(): AppConfig {
     ntfyTopicUrl: optionalEnv('NTFY__TOPIC_URL', ''),
     ntfyBlacklist: listEnv('NTFY__BLACKLIST'),
     spamAction: spamActionEnv(),
+    archiveRules: parseArchiveRules(optionalEnv('ARCHIVE__RULES', '')),
     fallbackPollSeconds: intEnv('FALLBACK_POLL_SECONDS', 60),
     reconnectAlertSeconds: intEnv('RECONNECT__ALERT_SECONDS', 3600),
     stateFile: optionalEnv('STATE_FILE', '/data/state.json'),
@@ -82,4 +90,34 @@ function spamActionEnv(): SpamAction {
   const raw = optionalEnv('SPAM__ACTION', 'gmail-spam').toLowerCase();
   if (raw === 'gmail-spam' || raw === 'inbox' || raw === 'skip') return raw;
   throw new Error(`Invalid SPAM__ACTION: ${raw} (expected gmail-spam|inbox|skip)`);
+}
+
+/** `;` = rules (OR), `|` = conditions in one rule (AND): `subject~Foo|from~bar@` */
+function parseArchiveRules(raw: string): ArchiveRule[] {
+  if (!raw) return [];
+  const rules: ArchiveRule[] = [];
+  for (const rulePart of raw.split(';')) {
+    const trimmed = rulePart.trim();
+    if (!trimmed) continue;
+    const rule: ArchiveRule = {};
+    for (const cond of trimmed.split('|')) {
+      const piece = cond.trim();
+      if (!piece) continue;
+      const match = /^(subject|from)~(.+)$/i.exec(piece);
+      if (!match) {
+        throw new Error(`Invalid ARCHIVE__RULES condition: ${piece}`);
+      }
+      const key = match[1].toLowerCase() as 'subject' | 'from';
+      const value = match[2].trim();
+      if (!value) {
+        throw new Error(`Empty ARCHIVE__RULES value: ${piece}`);
+      }
+      rule[key] = value;
+    }
+    if (rule.subject === undefined && rule.from === undefined) {
+      throw new Error(`Empty ARCHIVE__RULES rule: ${trimmed}`);
+    }
+    rules.push(rule);
+  }
+  return rules;
 }

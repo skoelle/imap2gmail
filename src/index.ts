@@ -25,6 +25,7 @@ async function main(): Promise<void> {
     config.spamAction,
     config.gmail.email,
     config.sourceSpamFolder,
+    config.archiveRules,
   );
 
   let shuttingDown = false;
@@ -70,7 +71,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   console.log(
-    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, sourceSpam=${config.sourceSpamFolder || 'off'}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
+    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
   );
 
   const backoffMs = [3000, 5000, 15000, 60000];

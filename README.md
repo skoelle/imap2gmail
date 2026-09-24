@@ -31,8 +31,9 @@
 1. 📡 Connect to source, select INBOX, compare `uidValidity` against state
 2. 🧹 Catch-up: fetch all `uid > lastUid` as raw RFC822 buffers
 3. 📨 Per message:
+   - 📦 If `ARCHIVE__RULES` match → append to Gmail `[Gmail]/All Mail`, **no ntfy** *(before spam)*
    - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to Gmail Spam, skip ntfy
-   - ✉️ Gmail `append(INBOX or [Gmail]/Spam, raw)`
+   - ✉️ Gmail `append(INBOX or [Gmail]/All Mail or [Gmail]/Spam, raw)`
    - 🗑️ Source UID `\Deleted` + expunge
    - ❌ Append failed → count in `state.failed`, advance past UID, retry later (no queue jam)
    - ⚠️ Delete failed after successful append → Gmail rollback (search by Message-ID and expunge)
@@ -52,6 +53,26 @@
 ```bash
 docker compose logs | grep -o 'to="[^"]*"' | sort | uniq -c | sort -rn
 ```
+
+### 📦 Archive rules (`ARCHIVE__RULES`)
+
+Route matching mail to Gmail **All Mail** instead of INBOX *(archived – no Inbox badge)*.
+Checked **before** spam; **no ntfy**; source still deleted.
+
+```bash
+# ; = rules (OR, first match wins), | = conditions in one rule (AND)
+# subject~ / from~ = case-insensitive "contains"
+ARCHIVE__RULES=subject~Newsletter;subject~Receipt|from~noreply@shop.de
+```
+
+| Piece | Meaning |
+|---|---|
+| `subject~text` | Subject contains `text` |
+| `from~text` | From header contains `text` |
+| `\|` | Both must match |
+| `;` | Next rule; empty = feature off |
+
+Spam (`SPAM__ACTION`) still applies only if **no** archive rule matched.
 
 ### 🛡️ Spam handling
 
@@ -131,6 +152,7 @@ cp .env.example .env
 | `NTFY__TOPIC_URL` | 🔔 e.g. `https://ntfy.sh/my-topic`; empty = off |
 | `NTFY__BLACKLIST` | 🤫 From addresses without ntfy *(comma-separated)*, e.g. `user@example.org` |
 | `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
+| `ARCHIVE__RULES` | 📦 Optional rules → Gmail All Mail, no ntfy; empty = off *(see above)* |
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |
 | `RECONNECT__ALERT_SECONDS` | ⚠️ ntfy after sustained reconnect failure; default `3600` (1h), once per container + recovery |
 | `STATE_FILE` | 🗃️ Default `/data/state.json` |
@@ -212,8 +234,8 @@ imap2gmail/
 │   ├── config.ts    # ⚙️ Env vars
 │   ├── state.ts     # 🗃️ JSON state: uid, pendingUid, failed attempts
 │   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete, spam header
-│   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/Spam), rollback
-│   ├── relay.ts     # 🔄 Catch-up, pending-UID, spam, failure retries/notice, ntfy
+│   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/All Mail/Spam), rollback
+│   ├── relay.ts     # 🔄 Catch-up, archive rules, spam, failure retries/notice, ntfy
 │   └── ntfy.ts      # 🔔 HTTP-POST *(empty URL = off)*
 ├── 🐳 Dockerfile
 ├── 🐳 docker-compose.yml

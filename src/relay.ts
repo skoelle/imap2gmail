@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
-import type { SpamAction } from './config.js';
+import type { ArchiveRule, SpamAction } from './config.js';
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
@@ -22,6 +22,7 @@ export class Relay {
     private readonly spamAction: SpamAction = 'gmail-spam',
     private readonly noticeFrom = 'imap2gmail@localhost',
     private readonly sourceSpamFolder = '',
+    private readonly archiveRules: ArchiveRule[] = [],
   ) {}
 
   async catchUp(): Promise<void> {
@@ -96,7 +97,24 @@ export class Relay {
     return kind === 'spam';
   }
 
+  /** First matching archive rule wins over spam and INBOX. */
+  private isArchived(message: SourceMessage): boolean {
+    if (this.archiveRules.length === 0) return false;
+    const subject = message.subject.toLowerCase();
+    const from = message.from.toLowerCase();
+    return this.archiveRules.some((rule) => {
+      if (rule.subject !== undefined && !subject.includes(rule.subject.toLowerCase())) {
+        return false;
+      }
+      if (rule.from !== undefined && !from.includes(rule.from.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }
+
   private shouldNotify(kind: FolderKind, message: SourceMessage): boolean {
+    if (this.isArchived(message)) return false;
     if (kind === 'spam') return false;
     if (message.isSpam && this.spamAction !== 'inbox') return false;
     return true;
@@ -166,7 +184,8 @@ export class Relay {
       return;
     }
 
-    const treatAsSpam = this.isSourceSpam(kind) || message.isSpam;
+    const archived = this.isArchived(message);
+    const treatAsSpam = !archived && (this.isSourceSpam(kind) || message.isSpam);
     if (treatAsSpam && this.spamAction === 'skip') {
       await this.source.deleteMessage(message.uid);
       this.saveFolder(kind, {
@@ -221,7 +240,8 @@ export class Relay {
       }
 
       try {
-        const treatAsSpam = this.isSourceSpam(kind) || message.isSpam;
+        const archived = this.isArchived(message);
+        const treatAsSpam = !archived && (this.isSourceSpam(kind) || message.isSpam);
         if (treatAsSpam && this.spamAction === 'skip') {
           await this.source.deleteMessage(uid);
           this.clearFailed(kind, uid);
@@ -246,7 +266,7 @@ export class Relay {
         await this.source.deleteMessage(uid);
         this.clearFailed(kind, uid);
         this.advanceLastUid(kind, uidValidity, uid);
-        const spamNote = treatAsSpam ? ' (spam)' : '';
+        const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : '';
         console.log(
           `[relay] ${kind} delivered previously failed uid=${uid}${spamNote} folder=${gmailFolder} to="${message.to}" subject="${message.subject}"`,
         );
@@ -260,6 +280,7 @@ export class Relay {
   }
 
   private gmailFolderFor(kind: FolderKind, message: SourceMessage): string {
+    if (this.isArchived(message)) return '[Gmail]/All Mail';
     if (this.isSourceSpam(kind)) return '[Gmail]/Spam';
     if (!message.isSpam || this.spamAction === 'inbox') return 'INBOX';
     return '[Gmail]/Spam';
@@ -271,7 +292,8 @@ export class Relay {
     uidValidity: number,
   ): Promise<void> {
     const before = this.loadFolder(kind);
-    const treatAsSpam = this.isSourceSpam(kind) || message.isSpam;
+    const archived = this.isArchived(message);
+    const treatAsSpam = !archived && (this.isSourceSpam(kind) || message.isSpam);
 
     if (treatAsSpam && this.spamAction === 'skip') {
       this.saveFolder(kind, {
@@ -333,7 +355,7 @@ export class Relay {
       pendingUid: undefined,
     });
     this.clearFailed(kind, message.uid);
-    const spamNote = treatAsSpam ? ' (spam)' : '';
+    const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : '';
     console.log(
       `[relay] ${kind} delivered uid=${message.uid}${spamNote} folder=${folder} to="${message.to}" subject="${message.subject}"`,
     );
