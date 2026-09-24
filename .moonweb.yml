@@ -1,0 +1,6 @@
+title: "imap2gmail"
+emoji: "📬"
+category: code
+subcategory: "Infra Tools"
+status: active
+stack: [TypeScript, Node.js, imapflow]
