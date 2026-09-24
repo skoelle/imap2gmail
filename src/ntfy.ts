@@ -32,13 +32,23 @@ export class Ntfy {
       return;
     }
     const line = `${from || '(unknown)'} – ${subject || '(no subject)'}`;
+    await this.post(line, 'email,inbox');
+  }
+
+  async system(body: string, kind: 'problem' | 'recovered'): Promise<void> {
+    if (!this.enabled) return;
+    const tags = kind === 'problem' ? 'warning,unplug' : 'white_check_mark';
+    await this.post(body, tags);
+  }
+
+  private async post(body: string, tags: string): Promise<void> {
     try {
       const res = await fetch(this.topicUrl, {
         method: 'POST',
-        body: line,
+        body,
         headers: {
           Title: 'imap2gmail',
-          Tags: 'email,inbox',
+          Tags: tags,
           Priority: 'urgent',
         },
       });

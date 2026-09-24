@@ -75,23 +75,51 @@ async function main(): Promise<void> {
 
   const backoffMs = [3000, 5000, 15000, 60000];
   let reconnectAttempt = 0;
+  let problemSince: number | null = null;
+  let problemNotified = false;
+  const alertMs = config.reconnectAlertSeconds * 1000;
+
+  const noteReconnectFailure = (err: unknown): void => {
+    const now = Date.now();
+    problemSince ??= now;
+    if (problemNotified) return;
+    if (now - problemSince < alertMs) return;
+    problemNotified = true;
+    const message = err instanceof Error ? err.message : String(err);
+    const minutes = Math.round((now - problemSince) / 60000);
+    void ntfy.system(
+      `reconnect failing >${config.reconnectAlertSeconds}s (${minutes}m): ${message}`,
+      'problem',
+    );
+  };
+
+  const noteReconnectSuccess = (): void => {
+    problemSince = null;
+    if (!problemNotified) return;
+    problemNotified = false;
+    void ntfy.system('reconnect recovered', 'recovered');
+  };
 
   while (!shuttingDown) {
     try {
       await source.idle();
       reconnectAttempt = 0;
+      noteReconnectSuccess();
     } catch (err) {
       if (shuttingDown) break;
       console.error('[main] idle/reconnect error:', err instanceof Error ? err.message : err);
+      noteReconnectFailure(err);
       await sleep(backoffMs[Math.min(reconnectAttempt, backoffMs.length - 1)]);
       try {
         source.releaseInbox();
         await source.ensureConnected();
         reconnectAttempt = 0;
+        noteReconnectSuccess();
         await trigger('after-reconnect');
       } catch (reconnectErr) {
         reconnectAttempt += 1;
         const wait = backoffMs[Math.min(reconnectAttempt, backoffMs.length - 1)];
+        noteReconnectFailure(reconnectErr);
         console.error(
           `[main] reconnect failed (attempt ${reconnectAttempt}):`,
           reconnectErr instanceof Error ? reconnectErr.message : reconnectErr,

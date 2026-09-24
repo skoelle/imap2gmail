@@ -18,6 +18,7 @@ export interface AppConfig {
   ntfyBlacklist: string[];
   spamAction: SpamAction;
   fallbackPollSeconds: number;
+  reconnectAlertSeconds: number;
   stateFile: string;
 }
 
@@ -72,6 +73,7 @@ export function loadConfig(): AppConfig {
     ntfyBlacklist: listEnv('NTFY__BLACKLIST'),
     spamAction: spamActionEnv(),
     fallbackPollSeconds: intEnv('FALLBACK_POLL_SECONDS', 60),
+    reconnectAlertSeconds: intEnv('RECONNECT__ALERT_SECONDS', 3600),
     stateFile: optionalEnv('STATE_FILE', '/data/state.json'),
   };
 }

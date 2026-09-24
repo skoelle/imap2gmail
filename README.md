@@ -42,7 +42,9 @@
 
 4. 😴 IDLE: imapflow auto-IDLE; `exists` event → catch-up
 5. ⏱️ Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
-6. 🔌 Reconnect: **new ImapFlow instance** (single-use) + backoff (3s → 60s) + catch-up
+6. 🔌 Reconnect: **new ImapFlow instance** (single-use) + backoff (3s → 60s) + catch-up  
+   - ⚠️ After `RECONNECT__ALERT_SECONDS` (default 1h) continuous failure → **one** ntfy per container start  
+   - ✅ Successful reconnect after that alert → **one** recovery ntfy
 7. 🚨 Crash window Append↔Delete: `pendingUid` in state → targeted recovery on startup
 
 **Recipient frequency** (docker logs only):
@@ -78,7 +80,8 @@ Two independent paths:
 - 🔁 Failed UIDs stay on the source, are retried every catch-up, counted in `state.failed`
 - 📮 After **3 failed attempts** → **one** notice mail to Gmail INBOX  
   `[imap2gmail] not delivered: <subject>` (never repeated for that UID)
-- 📭 No error ntfy pushes; details stay in `docker compose logs`
+- 📭 No error ntfy pushes for per-mail failures; details stay in `docker compose logs`  
+- ⚠️ **Reconnect** alerts are separate: one system ntfy after `RECONNECT__ALERT_SECONDS`, then one recovery ntfy (not From-Blacklisted)
 - 💥 Crash between append↔delete → `pendingUid` recovery (Message-ID check)
 
 ### 🗃️ State (`/data/state.json`)
@@ -129,6 +132,7 @@ cp .env.example .env
 | `NTFY__BLACKLIST` | 🤫 From addresses without ntfy *(comma-separated)*, e.g. `user@example.org` |
 | `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |
+| `RECONNECT__ALERT_SECONDS` | ⚠️ ntfy after sustained reconnect failure; default `3600` (1h), once per container + recovery |
 | `STATE_FILE` | 🗃️ Default `/data/state.json` |
 
 ### 4️⃣ 🚀 Start
