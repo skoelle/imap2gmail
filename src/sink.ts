@@ -4,19 +4,14 @@ import { ImapFlow } from 'imapflow';
 import type { ImapAccountConfig } from './config.js';
 
 export class Sink {
-  private readonly client: ImapFlow;
+  private readonly cfg: ImapAccountConfig;
+  private client: ImapFlow;
+  private connecting: Promise<void> | null = null;
+  private clientConnectCalled = false;
 
   constructor(cfg: ImapAccountConfig) {
-    this.client = new ImapFlow({
-      host: cfg.host,
-      port: cfg.port,
-      secure: true,
-      auth: {
-        user: cfg.email,
-        pass: cfg.password,
-      },
-      logger: false,
-    });
+    this.cfg = cfg;
+    this.client = this.createClient();
   }
 
   get usable(): boolean {
@@ -24,12 +19,25 @@ export class Sink {
   }
 
   async connect(): Promise<void> {
-    if (!this.client.usable) {
-      await this.client.connect();
-    }
-    if (this.client.mailbox === false || this.client.mailbox.path !== 'INBOX') {
-      await this.client.mailboxOpen('INBOX');
-    }
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      try {
+        // imapflow is single-use: after any disconnect, build a fresh instance.
+        if (!this.client.usable) {
+          if (this.clientConnectCalled) {
+            this.client = this.createClient();
+          }
+          this.clientConnectCalled = true;
+          await this.client.connect();
+        }
+        if (this.client.mailbox === false || this.client.mailbox.path !== 'INBOX') {
+          await this.client.mailboxOpen('INBOX');
+        }
+      } finally {
+        this.connecting = null;
+      }
+    })();
+    return this.connecting;
   }
 
   async ensureConnected(): Promise<void> {
@@ -75,5 +83,18 @@ export class Sink {
     } catch {
       // ignore shutdown errors
     }
+  }
+
+  private createClient(): ImapFlow {
+    return new ImapFlow({
+      host: this.cfg.host,
+      port: this.cfg.port,
+      secure: true,
+      auth: {
+        user: this.cfg.email,
+        pass: this.cfg.password,
+      },
+      logger: false,
+    });
   }
 }

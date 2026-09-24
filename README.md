@@ -42,7 +42,7 @@
 
 4. 😴 IDLE: imapflow auto-IDLE; `exists` event → catch-up
 5. ⏱️ Fallback poll every `FALLBACK_POLL_SECONDS` (safety net)
-6. 🔌 Reconnect: imapflow recovery + own catch-up
+6. 🔌 Reconnect: **new ImapFlow instance** (single-use) + backoff (3s → 60s) + catch-up
 7. 🚨 Crash window Append↔Delete: `pendingUid` in state → targeted recovery on startup
 
 **Recipient frequency** (docker logs only):

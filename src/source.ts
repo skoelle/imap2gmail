@@ -22,22 +22,26 @@ export interface SourceMessage {
 
 type MailboxLock = { release: () => void };
 
+type ExistsListener = (data: ExistsEvent) => void;
+type ErrorListener = (error: Error) => void;
+type ExpungeListener = (data: ExpungeEvent) => void;
+type FlagsListener = (data: FlagsEvent) => void;
+
 export class Source {
-  private readonly client: ImapFlow;
+  private readonly cfg: ImapAccountConfig;
+  private client: ImapFlow;
   private lock: MailboxLock | null = null;
   private selectedPath: string | null = null;
+  private connecting: Promise<void> | null = null;
+  private clientConnectCalled = false;
+  private readonly existsListeners: ExistsListener[] = [];
+  private readonly errorListeners: ErrorListener[] = [];
+  private readonly expungeListeners: ExpungeListener[] = [];
+  private readonly flagsListeners: FlagsListener[] = [];
 
   constructor(cfg: ImapAccountConfig) {
-    this.client = new ImapFlow({
-      host: cfg.host,
-      port: cfg.port,
-      secure: true,
-      auth: {
-        user: cfg.email,
-        pass: cfg.password,
-      },
-      logger: false,
-    });
+    this.cfg = cfg;
+    this.client = this.createClient();
   }
 
   get usable(): boolean {
@@ -48,25 +52,45 @@ export class Source {
     return this.client.mailbox;
   }
 
-  onExists(listener: (data: ExistsEvent) => void): void {
+  onExists(listener: ExistsListener): void {
+    this.existsListeners.push(listener);
     this.client.on('exists', listener);
   }
 
-  onError(listener: (error: Error) => void): void {
+  onError(listener: ErrorListener): void {
+    this.errorListeners.push(listener);
     this.client.on('error', listener);
   }
 
-  onExpunge(listener: (data: ExpungeEvent) => void): void {
+  onExpunge(listener: ExpungeListener): void {
+    this.expungeListeners.push(listener);
     this.client.on('expunge', listener);
   }
 
-  onFlags(listener: (data: FlagsEvent) => void): void {
+  onFlags(listener: FlagsListener): void {
+    this.flagsListeners.push(listener);
     this.client.on('flags', listener);
   }
 
   async connect(): Promise<void> {
     if (this.client.usable) return;
-    await this.client.connect();
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      try {
+        // imapflow is single-use: after any disconnect, build a fresh instance.
+        if (!this.client.usable) {
+          if (this.clientConnectCalled) {
+            this.resetMailbox();
+            this.replaceClient();
+          }
+          this.clientConnectCalled = true;
+          await this.client.connect();
+        }
+      } finally {
+        this.connecting = null;
+      }
+    })();
+    return this.connecting;
   }
 
   async ensureConnected(): Promise<void> {
@@ -90,9 +114,14 @@ export class Source {
   }
 
   releaseMailbox(): void {
-    this.lock?.release();
+    const lock = this.lock;
     this.lock = null;
     this.selectedPath = null;
+    try {
+      lock?.release();
+    } catch {
+      // ignore release on dead connection
+    }
   }
 
   releaseInbox(): void {
@@ -136,6 +165,32 @@ export class Source {
     } catch {
       // ignore shutdown errors
     }
+  }
+
+  private createClient(): ImapFlow {
+    const client = new ImapFlow({
+      host: this.cfg.host,
+      port: this.cfg.port,
+      secure: true,
+      auth: {
+        user: this.cfg.email,
+        pass: this.cfg.password,
+      },
+      logger: false,
+    });
+    for (const listener of this.existsListeners) client.on('exists', listener);
+    for (const listener of this.errorListeners) client.on('error', listener);
+    for (const listener of this.expungeListeners) client.on('expunge', listener);
+    for (const listener of this.flagsListeners) client.on('flags', listener);
+    return client;
+  }
+
+  private replaceClient(): void {
+    this.client = this.createClient();
+  }
+
+  private resetMailbox(): void {
+    this.releaseMailbox();
   }
 }
 

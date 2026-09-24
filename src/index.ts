@@ -73,23 +73,30 @@ async function main(): Promise<void> {
     `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, sourceSpam=${config.sourceSpamFolder || 'off'}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
   );
 
+  const backoffMs = [3000, 5000, 15000, 60000];
+  let reconnectAttempt = 0;
+
   while (!shuttingDown) {
     try {
       await source.idle();
+      reconnectAttempt = 0;
     } catch (err) {
       if (shuttingDown) break;
       console.error('[main] idle/reconnect error:', err instanceof Error ? err.message : err);
-      await sleep(3000);
+      await sleep(backoffMs[Math.min(reconnectAttempt, backoffMs.length - 1)]);
       try {
         source.releaseInbox();
         await source.ensureConnected();
+        reconnectAttempt = 0;
         await trigger('after-reconnect');
       } catch (reconnectErr) {
+        reconnectAttempt += 1;
+        const wait = backoffMs[Math.min(reconnectAttempt, backoffMs.length - 1)];
         console.error(
-          '[main] reconnect failed:',
+          `[main] reconnect failed (attempt ${reconnectAttempt}):`,
           reconnectErr instanceof Error ? reconnectErr.message : reconnectErr,
         );
-        await sleep(5000);
+        await sleep(wait);
       }
       continue;
     }
