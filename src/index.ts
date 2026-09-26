@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
 import { createServer } from 'node:http';
-import { loadConfig } from './config.js';
+import { archiveFolderFor, loadConfig } from './config.js';
 import { Ntfy } from './ntfy.js';
 import { Relay } from './relay.js';
 import { Sink } from './sink.js';
@@ -27,6 +27,7 @@ async function main(): Promise<void> {
     config.gmail.email,
     config.sourceSpamFolder,
     config.archiveRules,
+    archiveFolderFor(config.gmailLocale),
   );
 
   let shuttingDown = false;
@@ -123,7 +124,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   console.log(
-    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
+    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, gmailLocale=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
   );
 
   const backoffMs = [3000, 5000, 15000, 60000];

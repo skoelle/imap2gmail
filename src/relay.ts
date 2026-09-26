@@ -29,6 +29,7 @@ export class Relay {
     private readonly noticeFrom = 'imap2gmail@localhost',
     private readonly sourceSpamFolder = '',
     private readonly archiveRules: ArchiveRule[] = [],
+    private readonly archiveFolder = '[Gmail]/All Mail',
   ) {}
 
   async catchUp(): Promise<void> {
@@ -311,7 +312,7 @@ export class Relay {
   }
 
   private gmailFolderFor(kind: FolderKind, message: SourceMessage): string {
-    if (this.isArchived(message)) return '[Gmail]/All Mail';
+    if (this.isArchived(message)) return this.archiveFolder;
     if (this.isSourceSpam(kind)) return '[Gmail]/Spam';
     if (!message.isSpam || this.spamAction === 'inbox') return 'INBOX';
     return '[Gmail]/Spam';

@@ -9,6 +9,9 @@ export interface ImapAccountConfig {
 
 export type SpamAction = 'gmail-spam' | 'inbox' | 'skip';
 
+/** Gmail UI language; selects localized special folder names (e.g. All Mail). */
+export type GmailLocale = 'de' | 'en';
+
 /** Route to Gmail All Mail when all set fields match (case-insensitive contains). */
 export interface ArchiveRule {
   subject?: string;
@@ -20,6 +23,7 @@ export interface AppConfig {
   /** Source spam folder path (e.g. "Spam"); empty = disabled. */
   sourceSpamFolder: string;
   gmail: ImapAccountConfig;
+  gmailLocale: GmailLocale;
   ntfyTopicUrl: string;
   ntfyBlacklist: string[];
   spamAction: SpamAction;
@@ -79,6 +83,7 @@ export function loadConfig(): AppConfig {
       email: requireEnv('GMAIL__EMAIL'),
       password: requireEnv('GMAIL__APP_PASSWORD'),
     },
+    gmailLocale: gmailLocaleEnv(),
     ntfyTopicUrl: optionalEnv('NTFY__TOPIC_URL', ''),
     ntfyBlacklist: listEnv('NTFY__BLACKLIST'),
     spamAction: spamActionEnv(),
@@ -96,6 +101,17 @@ function spamActionEnv(): SpamAction {
   const raw = optionalEnv('SPAM__ACTION', 'gmail-spam').toLowerCase();
   if (raw === 'gmail-spam' || raw === 'inbox' || raw === 'skip') return raw;
   throw new Error(`Invalid SPAM__ACTION: ${raw} (expected gmail-spam|inbox|skip)`);
+}
+
+function gmailLocaleEnv(): GmailLocale {
+  const raw = optionalEnv('GMAIL__LOCALE', 'de').toLowerCase();
+  if (raw === 'de' || raw === 'en') return raw;
+  throw new Error(`Invalid GMAIL__LOCALE: ${raw} (expected de|en)`);
+}
+
+/** Localized Gmail archive folder (Gmail has no reliable SPECIAL-USE for All Mail). */
+export function archiveFolderFor(locale: GmailLocale): string {
+  return locale === 'en' ? '[Gmail]/All Mail' : '[Gmail]/Alle E-Mails';
 }
 
 /** `;` = rules (OR), `|` = conditions in one rule (AND): `subject~Foo|from~bar@` */
