@@ -60,6 +60,15 @@ docker compose logs | grep -o 'to="[^"]*"' | sort | uniq -c | sort -rn
 Route matching mail to Gmail **All Mail** instead of INBOX *(archived – no Inbox badge)*.
 Checked **before** spam; **no ntfy**; source still deleted.
 
+The All Mail folder is auto-detected from the SPECIAL-USE `\All` attribute of
+Gmail's `LIST` response (the visible name is account-language dependent, e.g.
+`[Gmail]/Alle Nachrichten`), so `GMAIL__LOCALE` is only used as a fallback name.
+Startup log shows the resolved path:
+
+```
+[sink] archive folder resolved via special-use: "[Gmail]/Alle Nachrichten"
+```
+
 ```bash
 # ; = rules (OR, first match wins), | = conditions in one rule (AND)
 # subject~ / from~ = case-insensitive "contains"

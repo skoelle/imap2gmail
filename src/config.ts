@@ -9,7 +9,7 @@ export interface ImapAccountConfig {
 
 export type SpamAction = 'gmail-spam' | 'inbox' | 'skip';
 
-/** Gmail UI language; selects localized special folder names (e.g. All Mail). */
+/** Fallback locale for the Gmail All Mail folder name (primary: SPECIAL-USE \All discovery). */
 export type GmailLocale = 'de' | 'en';
 
 /** Route to Gmail All Mail when all set fields match (case-insensitive contains). */
