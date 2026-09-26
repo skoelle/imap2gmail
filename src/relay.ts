@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
 import type { ArchiveRule, SpamAction } from './config.js';
-import { isConnectionGone } from './errors.js';
+import { formatImapError, isConnectionGone } from './errors.js';
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
@@ -354,7 +354,7 @@ export class Relay {
       await this.sink.append(message.raw, folder);
     } catch (err) {
       throw new Error(
-        `Gmail append failed for uid ${message.uid}: ${err instanceof Error ? err.message : err}`,
+        `Gmail append failed for uid ${message.uid} (size=${message.raw.length}): ${formatImapError(err)}`,
       );
     }
 
@@ -376,7 +376,7 @@ export class Relay {
         return;
       }
       throw new Error(
-        `Source delete failed for uid ${message.uid}: ${err instanceof Error ? err.message : err}`,
+        `Source delete failed for uid ${message.uid}: ${formatImapError(err)}`,
       );
     }
 
@@ -402,7 +402,7 @@ export class Relay {
     error: unknown,
     opts: { keepPending?: boolean } = {},
   ): Promise<void> {
-    const errMsg = error instanceof Error ? error.message : String(error);
+    const errMsg = formatImapError(error);
     if (isConnectionGone(error)) this.connectionLost = true;
     const folder = await this.loadFolder(kind);
     const failed: Record<string, FailedEntry> = { ...(folder.failed ?? {}) };
