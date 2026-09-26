@@ -31,7 +31,7 @@
 1. 📡 Connect to source, select INBOX, compare `uidValidity` against state
 2. 🧹 Catch-up: fetch all `uid > lastUid` as raw RFC822 buffers
 3. 📨 Per message:
-   - 📦 If `ARCHIVE__RULES` match → append to Gmail All Mail (`GMAIL__LOCALE`, default `[Gmail]/Alle E-Mails`), **no ntfy** *(before spam)*
+   - 📦 If `ARCHIVE__RULES` match → append to Gmail All Mail (folder auto-detected via SPECIAL-USE `\All`, `GMAIL__LOCALE` = fallback name), **no ntfy** *(before spam)*
    - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to Gmail Spam, skip ntfy
    - ✉️ Gmail `append(INBOX or All Mail or [Gmail]/Spam, raw)`
    - 🗑️ Source UID `\Deleted` + expunge
@@ -154,7 +154,7 @@ cp .env.example .env
 | `NTFY__BLACKLIST` | 🤫 From addresses without ntfy *(comma-separated)*, e.g. `user@example.org` |
 | `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
 | `ARCHIVE__RULES` | 📦 Optional rules → Gmail All Mail, no ntfy; empty = off *(see above)* |
-| `GMAIL__LOCALE` | 🌐 `de` *(default)* \| `en` – localized Gmail archive folder name (`[Gmail]/Alle E-Mails` \| `[Gmail]/All Mail`) |
+| `GMAIL__LOCALE` | 🌐 `de` *(default)* \| `en` – fallback name for the Gmail archive folder if SPECIAL-USE discovery finds no `\All` (`[Gmail]/Alle E-Mails` \| `[Gmail]/All Mail`) |
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |
 | `RECONNECT__ALERT_SECONDS` | ⚠️ ntfy after sustained reconnect failure; default `3600` (1h), once per container + recovery |
 | `IDLE__TIMEOUT_SECONDS` | ⏱️ Hard cap per IDLE wait (default `600`); on expiry the source client is rebuilt |

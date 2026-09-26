@@ -172,6 +172,9 @@ export class Relay {
     }
 
     await this.retryFailed(kind, uidValidity);
+    // retryFailed advances lastUid in the store – reload or the batch loop below
+    // would re-fetch (and re-deliver) the failed UIDs.
+    folder = await this.loadFolder(kind);
 
     // Batched fetch: bounds memory on large backlogs, advances the cursor per message.
     let progressGuard = folder.lastUid;
@@ -230,7 +233,8 @@ export class Relay {
       return;
     }
 
-    const inGmail = await this.sink.hasMessageId(message.messageId);
+    const targetFolder = await this.gmailFolderFor(kind, message);
+    const inGmail = await this.sink.hasMessageId(message.messageId, targetFolder);
     if (inGmail) {
       await this.source.deleteMessage(message.uid);
       await this.saveFolder(kind, {
@@ -282,7 +286,12 @@ export class Relay {
           continue;
         }
 
-        if (message.messageId && (await this.sink.hasMessageId(message.messageId))) {
+        const gmailFolder = await this.gmailFolderFor(kind, message);
+
+        if (
+          message.messageId &&
+          (await this.sink.hasMessageId(message.messageId, gmailFolder))
+        ) {
           await this.source.deleteMessage(uid);
           await this.clearFailed(kind, uid);
           await this.advanceLastUid(kind, uidValidity, uid);
@@ -293,7 +302,6 @@ export class Relay {
           continue;
         }
 
-        const gmailFolder = this.gmailFolderFor(kind, message);
         await this.sink.append(message.raw, gmailFolder);
         await this.source.deleteMessage(uid);
         await this.clearFailed(kind, uid);
@@ -311,8 +319,13 @@ export class Relay {
     }
   }
 
-  private gmailFolderFor(kind: FolderKind, message: SourceMessage): string {
-    if (this.isArchived(message)) return this.archiveFolder;
+  private async gmailFolderFor(
+    kind: FolderKind,
+    message: SourceMessage,
+  ): Promise<string> {
+    if (this.isArchived(message)) {
+      return await this.sink.archiveFolder(this.archiveFolder);
+    }
     if (this.isSourceSpam(kind)) return '[Gmail]/Spam';
     if (!message.isSpam || this.spamAction === 'inbox') return 'INBOX';
     return '[Gmail]/Spam';
@@ -350,7 +363,7 @@ export class Relay {
       pendingUid: message.uid,
     });
 
-    const folder = this.gmailFolderFor(kind, message);
+    const folder = await this.gmailFolderFor(kind, message);
     try {
       await this.sink.append(message.raw, folder);
     } catch (err) {
@@ -364,7 +377,7 @@ export class Relay {
     } catch (err) {
       let rollbackOk = false;
       try {
-        await this.sink.deleteByMessageId(message.messageId);
+        await this.sink.deleteByMessageId(message.messageId, folder);
         rollbackOk = true;
       } catch (rollbackErr) {
         console.error(

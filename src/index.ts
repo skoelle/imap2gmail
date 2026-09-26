@@ -73,6 +73,10 @@ async function main(): Promise<void> {
   console.log('[main] connecting to source and Gmail…');
   await source.connect();
   await sink.connect();
+  if (config.archiveRules.length > 0) {
+    // Warm up the All Mail discovery so the resolved path is visible in the startup log.
+    await sink.archiveFolder(archiveFolderFor(config.gmailLocale));
+  }
 
   source.onExists(() => {
     void trigger('exists');

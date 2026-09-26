@@ -109,7 +109,7 @@ function gmailLocaleEnv(): GmailLocale {
   throw new Error(`Invalid GMAIL__LOCALE: ${raw} (expected de|en)`);
 }
 
-/** Localized Gmail archive folder (Gmail has no reliable SPECIAL-USE for All Mail). */
+/** Fallback name for Gmail's All Mail folder (primary resolution: SPECIAL-USE \All via LIST). */
 export function archiveFolderFor(locale: GmailLocale): string {
   return locale === 'en' ? '[Gmail]/All Mail' : '[Gmail]/Alle E-Mails';
 }
