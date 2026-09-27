@@ -6,6 +6,7 @@ import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
 import type { Source, SourceMessage } from './source.js';
 import type { FailedEntry, FolderState, StateStore } from './state.js';
+import { SpamCsvLogger } from './spamCsvLogger.js';
 
 const MAX_FAIL_ATTEMPTS = 3;
 /** Safety valve: drop the oldest failed UIDs beyond this size (mail stays on source). */
@@ -30,6 +31,7 @@ export class Relay {
     private readonly sourceSpamFolder = '',
     private readonly archiveRules: ArchiveRule[] = [],
     private readonly archiveFolder = '[Gmail]/All Mail',
+    private readonly spamCsv: SpamCsvLogger = new SpamCsvLogger(''),
   ) {}
 
   async catchUp(): Promise<void> {
@@ -229,6 +231,7 @@ export class Relay {
         pendingUid: undefined,
       });
       await this.clearFailed(kind, message.uid);
+      await this.spamCsv.log(message, this.mailboxPath(kind));
       console.log(`[relay] ${kind} skipped spam uid=${pendingUid} (deleted from source)`);
       return;
     }
@@ -243,6 +246,9 @@ export class Relay {
         pendingUid: undefined,
       });
       await this.clearFailed(kind, message.uid);
+      if (treatAsSpam) {
+        await this.spamCsv.log(message, this.mailboxPath(kind));
+      }
       if (this.shouldNotify(kind, message)) {
         await this.ntfy.notify(message.from, message.subject);
       }
@@ -282,6 +288,7 @@ export class Relay {
           await this.source.deleteMessage(uid);
           await this.clearFailed(kind, uid);
           await this.advanceLastUid(kind, uidValidity, uid);
+          await this.spamCsv.log(message, this.mailboxPath(kind));
           console.log(`[relay] ${kind} skipped spam uid=${uid} on retry`);
           continue;
         }
@@ -295,6 +302,9 @@ export class Relay {
           await this.source.deleteMessage(uid);
           await this.clearFailed(kind, uid);
           await this.advanceLastUid(kind, uidValidity, uid);
+          if (treatAsSpam) {
+            await this.spamCsv.log(message, this.mailboxPath(kind));
+          }
           if (this.shouldNotify(kind, message)) {
             await this.ntfy.notify(message.from, message.subject);
           }
@@ -307,6 +317,9 @@ export class Relay {
         await this.clearFailed(kind, uid);
         await this.advanceLastUid(kind, uidValidity, uid);
         const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : '';
+        if (treatAsSpam) {
+          await this.spamCsv.log(message, this.mailboxPath(kind));
+        }
         console.log(
           `[relay] ${kind} delivered previously failed uid=${uid}${spamNote} folder=${gmailFolder} to="${message.to}" subject="${message.subject}"`,
         );
@@ -353,6 +366,7 @@ export class Relay {
         pendingUid: undefined,
       });
       await this.clearFailed(kind, message.uid);
+      await this.spamCsv.log(message, this.mailboxPath(kind));
       console.log(`[relay] ${kind} skipped spam uid=${message.uid} subject="${message.subject}"`);
       return;
     }
@@ -401,6 +415,9 @@ export class Relay {
     });
     await this.clearFailed(kind, message.uid);
     const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : '';
+    if (treatAsSpam) {
+      await this.spamCsv.log(message, this.mailboxPath(kind));
+    }
     console.log(
       `[relay] ${kind} delivered uid=${message.uid}${spamNote} folder=${folder} to="${message.to}" subject="${message.subject}"`,
     );

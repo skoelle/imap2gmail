@@ -105,6 +105,12 @@ Two independent paths:
 
 💡 Tip: keep provider spam *in its source folder* **or** in INBOX with headers – both land in Gmail Spam for review.
 
+**CSV log** – every processed spam message *(both paths, including `skip`)* is appended to a CSV file:
+
+- Default: `spam.csv` next to `STATE_FILE` (e.g. `/data/spam.csv`), override with `SPAM__CSV__FILE`, disable with `SPAM__CSV__ENABLED=false`
+- Columns: `timestamp,uid,from,to,subject,sourceFolder`
+- Write errors only log a warning – they never block message delivery
+
 ### 🚨 Failure handling
 
 - 🧩 A single bad mail **does not block** later mails (per-message try/catch)
@@ -162,6 +168,7 @@ cp .env.example .env
 | `NTFY__TOPIC_URL` | 🔔 e.g. `https://ntfy.sh/my-topic`; empty = off |
 | `NTFY__BLACKLIST` | 🤫 From addresses without ntfy *(comma-separated)*, e.g. `user@example.org` |
 | `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
+| `SPAM__CSV__ENABLED` / `SPAM__CSV__FILE` | 📄 CSV log of processed spam; default `true`, file `spam.csv` next to `STATE_FILE` *(see above)* |
 | `ARCHIVE__RULES` | 📦 Optional rules → Gmail All Mail, no ntfy; empty = off *(see above)* |
 | `GMAIL__LOCALE` | 🌐 `de` *(default)* \| `en` – fallback name for the Gmail archive folder if SPECIAL-USE discovery finds no `\All` (`[Gmail]/Alle E-Mails` \| `[Gmail]/All Mail`) |
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |

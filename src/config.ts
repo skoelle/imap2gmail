@@ -1,5 +1,7 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
+import { dirname, join } from 'node:path';
+
 export interface ImapAccountConfig {
   host: string;
   port: number;
@@ -34,6 +36,8 @@ export interface AppConfig {
   healthPort: number;
   healthStaleSeconds: number;
   stateFile: string;
+  /** CSV log for processed SPAM messages; empty = disabled. */
+  spamCsvFile: string;
 }
 
 function requireEnv(name: string): string {
@@ -69,6 +73,7 @@ function listEnv(name: string): string[] {
 }
 
 export function loadConfig(): AppConfig {
+  const stateFile = optionalEnv('STATE_FILE', '/data/state.json');
   return {
     source: {
       host: requireEnv('SOURCE__HOST'),
@@ -93,8 +98,20 @@ export function loadConfig(): AppConfig {
     idleTimeoutSeconds: intEnv('IDLE__TIMEOUT_SECONDS', 600),
     healthPort: intEnv('HEALTH__PORT', 0),
     healthStaleSeconds: intEnv('HEALTH__STALE_SECONDS', 900),
-    stateFile: optionalEnv('STATE_FILE', '/data/state.json'),
+    stateFile,
+    spamCsvFile: spamCsvFileEnv(stateFile),
   };
+}
+
+function spamCsvFileEnv(stateFile: string): string {
+  const enabled = optionalEnv('SPAM__CSV__ENABLED', 'true').toLowerCase();
+  if (enabled === 'false' || enabled === 'off' || enabled === '0') return '';
+  if (enabled !== 'true' && enabled !== 'on' && enabled !== '1') {
+    throw new Error(`Invalid SPAM__CSV__ENABLED: ${enabled} (expected true|false)`);
+  }
+  const custom = optionalEnv('SPAM__CSV__FILE', '');
+  if (custom) return custom;
+  return join(dirname(stateFile), 'spam.csv');
 }
 
 function spamActionEnv(): SpamAction {
