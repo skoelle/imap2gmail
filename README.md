@@ -97,8 +97,10 @@ unlike `SPAM__ACTION=skip` (header-based) they never reach Gmail at all.
 - Checked **before** archive rules and spam handling, applies to INBOX *and*
   the optional source spam folder
 - Trash folder: SPECIAL-USE `\Trash` wins, fallback name `REMOVE__TRASH__FOLDER`
-  (default `Trash`, e.g. IONOS: `Papierkorb`). No trash folder found → the
-  message is retried and stays in the INBOX *(never silently dropped)*
+  (default `Trash`, e.g. IONOS: `Papierkorb`). Resolved eagerly at startup – the
+  result is shown in the `[main] running` log line (`trash="…"`). No trash
+  folder found → warn at startup + the message is retried and stays in the
+  INBOX *(never silently dropped)*
 - Matches are logged to the [spam CSV](#-spam-handling) *(same columns; the
   console line says `by blocklist`)*
 

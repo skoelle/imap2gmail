@@ -85,6 +85,18 @@ async function main(): Promise<void> {
     await sink.archiveFolder(archiveFolderFor(config.gmailLocale));
   }
 
+  let removeTrash = '';
+  if (blocklist.enabled) {
+    try {
+      removeTrash = await source.trashFolder(config.removeTrashFolder);
+    } catch (err) {
+      console.warn(
+        '[main] trash folder discovery failed (will retry on first remove-list match):',
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
+
   source.onExists(() => {
     void trigger('exists');
   });
@@ -135,7 +147,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   console.log(
-    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, spamCsv=${config.spamCsvFile || 'off'}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, blocklist=${blocklist.enabled ? `${blocklist.count} rules (${config.removeFile})` : 'off'}, archiveLocaleFallback=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
+    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, spamCsv=${config.spamCsvFile || 'off'}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, blocklist=${blocklist.enabled ? `${blocklist.count} rules (${config.removeFile}), trash="${removeTrash || 'unresolved'}"` : 'off'}, archiveLocaleFallback=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
   );
 
   const backoffMs = [3000, 5000, 15000, 60000];
