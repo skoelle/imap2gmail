@@ -33,6 +33,7 @@ export class Source {
   private client: ImapFlow;
   private lock: MailboxLock | null = null;
   private selectedPath: string | null = null;
+  private trashPath: string | null = null;
   private connecting: Promise<void> | null = null;
   private clientConnectCalled = false;
   private readonly existsListeners: ExistsListener[] = [];
@@ -158,6 +159,43 @@ export class Source {
 
   async deleteMessage(uid: number): Promise<void> {
     await this.run((client) => client.messageDelete(uid, { uid: true }));
+  }
+
+  /**
+   * Resolve the source Trash folder. SPECIAL-USE `\Trash` wins; the configured
+   * name is the fallback. Result is cached; nothing found → throw (caller retries).
+   */
+  async trashFolder(fallback: string): Promise<string> {
+    if (this.trashPath) return this.trashPath;
+    const folders = await this.run((client) => client.list());
+    const available = folders.map((e) => e.path).join(', ');
+    const trash = folders.find(
+      (entry) => entry.specialUse === '\\Trash' || entry.flags.has('\\Trash'),
+    );
+    if (trash) {
+      this.trashPath = trash.path;
+      console.log(`[source] trash folder resolved via special-use: "${trash.path}"`);
+      return trash.path;
+    }
+    if (fallback && folders.some((entry) => entry.path === fallback)) {
+      this.trashPath = fallback;
+      console.log(`[source] trash folder resolved via configured name: "${fallback}"`);
+      return fallback;
+    }
+    throw new Error(
+      fallback
+        ? `no trash folder found (no \\Trash special-use, "${fallback}" not listed; available: ${available})`
+        : `no trash folder found (no \\Trash special-use, no fallback configured; available: ${available})`,
+    );
+  }
+
+  async moveToTrash(uid: number, trashPath: string): Promise<void> {
+    const result = await this.run((client) =>
+      client.messageMove(uid, trashPath, { uid: true }),
+    );
+    if (result === false || result === undefined) {
+      throw new Error(`MOVE uid ${uid} to "${trashPath}" did not run`);
+    }
   }
 
   async idle(timeoutMs: number): Promise<void> {

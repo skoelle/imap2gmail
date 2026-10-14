@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
 import { createServer } from 'node:http';
+import { Blocklist } from './blocklist.js';
 import { archiveFolderFor, loadConfig } from './config.js';
 import { Ntfy } from './ntfy.js';
 import { Relay } from './relay.js';
@@ -20,6 +21,7 @@ async function main(): Promise<void> {
   const state = new StateStore(config.stateFile);
   const ntfy = new Ntfy(config.ntfyTopicUrl, config.ntfyBlacklist);
   const spamCsv = new SpamCsvLogger(config.spamCsvFile);
+  const blocklist = new Blocklist(config.removeFile);
   const relay = new Relay(
     source,
     sink,
@@ -31,6 +33,8 @@ async function main(): Promise<void> {
     config.archiveRules,
     archiveFolderFor(config.gmailLocale),
     spamCsv,
+    blocklist,
+    config.removeTrashFolder,
   );
 
   let shuttingDown = false;
@@ -131,7 +135,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   console.log(
-    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, spamCsv=${config.spamCsvFile || 'off'}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, archiveLocaleFallback=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
+    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, spamCsv=${config.spamCsvFile || 'off'}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, blocklist=${blocklist.enabled ? `${blocklist.count} rules (${config.removeFile})` : 'off'}, archiveLocaleFallback=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
   );
 
   const backoffMs = [3000, 5000, 15000, 60000];

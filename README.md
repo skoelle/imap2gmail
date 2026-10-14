@@ -31,6 +31,7 @@
 1. 📡 Connect to source, select INBOX, compare `uidValidity` against state
 2. 🧹 Catch-up: fetch all `uid > lastUid` as raw RFC822 buffers
 3. 📨 Per message:
+   - 🚫 If the `REMOVE__FILE` list matches → move to source trash, **never delivered** *(checked first)*
    - 📦 If `ARCHIVE__RULES` match → append to Gmail All Mail (folder auto-detected via SPECIAL-USE `\All`, `GMAIL__LOCALE` = fallback name), **no ntfy** *(before spam)*
    - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to Gmail Spam, skip ntfy
    - ✉️ Gmail `append(INBOX or All Mail or [Gmail]/Spam, raw)`
@@ -83,6 +84,38 @@ ARCHIVE__RULES=subject~Newsletter;subject~Receipt|from~noreply@shop.de
 | `;` | Next rule; empty = feature off |
 
 Spam (`SPAM__ACTION`) still applies only if **no** archive rule matched.
+
+### 🚫 Remove list (`REMOVE__FILE`)
+
+Hard blocklist for spam that is trivial to recognize by sender or subject:
+matching messages are **moved to the source IMAP trash and never imported** –
+unlike `SPAM__ACTION=skip` (header-based) they never reach Gmail at all.
+
+- File-based (`/data/remove-list.txt` by default, override with `REMOVE__FILE`,
+  empty = off) – edit it directly in the mounted `./data` folder
+- **Hot reload**: changes apply on the next catch-up, no restart needed
+- Checked **before** archive rules and spam handling, applies to INBOX *and*
+  the optional source spam folder
+- Trash folder: SPECIAL-USE `\Trash` wins, fallback name `REMOVE__TRASH__FOLDER`
+  (default `Trash`, e.g. IONOS: `Papierkorb`). No trash folder found → the
+  message is retried and stays in the INBOX *(never silently dropped)*
+- Matches are logged to the [spam CSV](#-spam-handling) *(same columns; the
+  console line says `by blocklist`)*
+
+```bash
+# one rule per line, # = comment, case-insensitive "contains"
+krypto-gewinn.de               # subject OR from contains …
+from~noreply@betruger.de       # … only the sender
+subject~Gewinnmitteilung       # … only the subject
+from~promo@x.de|subject~aktien # AND
+```
+
+Lines where any `|`-separated piece starts with `from~` / `subject~` are
+structured rules; every other line is plain text matched against subject **or**
+from (so texts containing `~` are fine). Invalid lines are silently ignored
+and never break the list.
+
+Template: [`remove-list.example.txt`](remove-list.example.txt)
 
 ### 🛡️ Spam handling
 
@@ -170,6 +203,8 @@ cp .env.example .env
 | `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
 | `SPAM__CSV__ENABLED` / `SPAM__CSV__FILE` | 📄 CSV log of processed spam; default `true`, file `spam.csv` next to `STATE_FILE` *(see above)* |
 | `ARCHIVE__RULES` | 📦 Optional rules → Gmail All Mail, no ntfy; empty = off *(see above)* |
+| `REMOVE__FILE` | 🚫 Remove list file (move to source trash on match, never deliver); default `/data/remove-list.txt`, empty = off *(see above)* |
+| `REMOVE__TRASH__FOLDER` | 🗑️ Fallback trash folder name for the source IMAP when SPECIAL-USE `\Trash` is missing; default `Trash`, empty = special-use only *(e.g. IONOS: `Papierkorb`)* |
 | `GMAIL__LOCALE` | 🌐 `de` *(default)* \| `en` – fallback name for the Gmail archive folder if SPECIAL-USE discovery finds no `\All` (`[Gmail]/Alle E-Mails` \| `[Gmail]/All Mail`) |
 | `FALLBACK_POLL_SECONDS` | ⏱️ Default `60` |
 | `RECONNECT__ALERT_SECONDS` | ⚠️ ntfy after sustained reconnect failure; default `3600` (1h), once per container + recovery |
@@ -255,11 +290,13 @@ imap2gmail/
 │   ├── state.ts     # 🗃️ JSON state: uid, pendingUid, failed attempts
 │   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete, spam header
 │   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/All Mail/Spam), rollback
-│   ├── relay.ts     # 🔄 Catch-up, archive rules, spam, failure retries/notice, ntfy
+│   ├── relay.ts     # 🔄 Catch-up, remove list, archive rules, spam, failure retries/notice, ntfy
+│   ├── blocklist.ts # 🚫 Remove list file: delete on match, hot reload
 │   └── ntfy.ts      # 🔔 HTTP-POST *(empty URL = off)*
 ├── 🐳 Dockerfile
 ├── 🐳 docker-compose.yml
-└── 📄 .env.example
+├── 📄 .env.example
+└── 📄 remove-list.example.txt
 ```
 
 ---

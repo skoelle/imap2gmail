@@ -38,6 +38,10 @@ export interface AppConfig {
   stateFile: string;
   /** CSV log for processed SPAM messages; empty = disabled. */
   spamCsvFile: string;
+  /** Remove-list file (move to trash on match, never deliver); empty = disabled. */
+  removeFile: string;
+  /** Source trash folder name when SPECIAL-USE \Trash is missing; empty = special-use only. */
+  removeTrashFolder: string;
 }
 
 function requireEnv(name: string): string {
@@ -100,6 +104,8 @@ export function loadConfig(): AppConfig {
     healthStaleSeconds: intEnv('HEALTH__STALE_SECONDS', 900),
     stateFile,
     spamCsvFile: spamCsvFileEnv(stateFile),
+    removeFile: optionalEnv('REMOVE__FILE', '/data/remove-list.txt'),
+    removeTrashFolder: optionalEnv('REMOVE__TRASH__FOLDER', 'Trash'),
   };
 }
 

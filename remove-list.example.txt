@@ -1,0 +1,23 @@
+# imap2gmail Remove-Liste – eine Regel pro Zeile, case-insensitive "enthält"
+# Treffer werden in den Papierkorb der Quell-IMAP verschoben und nie nach
+# Gmail importiert. Hot-Reload: Änderungen greifen beim nächsten Catch-up
+# (ohne Neustart).
+#
+# Zeilen, die mit from~ oder subject~ beginnen, sind Regeln (| = UND);
+# alles andere ist Freitext und passt auf Betreff ODER Absender.
+#
+# Diese Datei ist eine Vorlage – nach /data/remove-list.txt kopieren und
+# anpassen (Pfad per REMOVE__FILE konfigurierbar, leer = aus).
+
+# Freitext: passt auf Betreff ODER Absender
+krypto-gewinn.de
+lotto-sonderziehung.com
+
+# nur Absender
+from~noreply@betruger.de
+
+# nur Betreff
+subject~Gewinnmitteilung
+
+# Kombination: beide Bedingungen müssen zutreffen (UND)
+from~promo@spammer.de|subject~aktien

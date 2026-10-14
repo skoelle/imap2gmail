@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Stefan Koelle (https://stefankoelle.de)
 // Licensed under the MIT License. See LICENSE file in project root for details.
 import type { ArchiveRule, SpamAction } from './config.js';
+import { Blocklist } from './blocklist.js';
 import { formatImapError, isConnectionGone } from './errors.js';
 import type { Ntfy } from './ntfy.js';
 import type { Sink } from './sink.js';
@@ -32,6 +33,8 @@ export class Relay {
     private readonly archiveRules: ArchiveRule[] = [],
     private readonly archiveFolder = '[Gmail]/All Mail',
     private readonly spamCsv: SpamCsvLogger = new SpamCsvLogger(''),
+    private readonly blocklist: Blocklist = new Blocklist(''),
+    private readonly removeTrashFolder = 'Trash',
   ) {}
 
   async catchUp(): Promise<void> {
@@ -55,6 +58,7 @@ export class Relay {
     const startedAt = Date.now();
     await this.source.ensureConnected();
     await this.sink.ensureConnected();
+    await this.blocklist.reload();
 
     await this.processFolder('inbox');
 
@@ -134,6 +138,12 @@ export class Relay {
       }
       return true;
     });
+  }
+
+  /** Move a remove-list match out of the current mailbox into source Trash. */
+  private async removeToTrash(uid: number): Promise<void> {
+    const trash = await this.source.trashFolder(this.removeTrashFolder);
+    await this.source.moveToTrash(uid, trash);
   }
 
   private shouldNotify(kind: FolderKind, message: SourceMessage): boolean {
@@ -221,6 +231,19 @@ export class Relay {
       return;
     }
 
+    if (this.blocklist.matches(message)) {
+      await this.removeToTrash(message.uid);
+      await this.saveFolder(kind, {
+        ...folder,
+        lastUid: Math.max(folder.lastUid, pendingUid),
+        pendingUid: undefined,
+      });
+      await this.clearFailed(kind, message.uid);
+      await this.spamCsv.log(message, this.mailboxPath(kind));
+      console.log(`[relay] ${kind} moved pending uid=${pendingUid} by blocklist to trash`);
+      return;
+    }
+
     const archived = this.isArchived(message);
     const treatAsSpam = !archived && (this.isSourceSpam(kind) || message.isSpam);
     if (treatAsSpam && this.spamAction === 'skip') {
@@ -282,6 +305,15 @@ export class Relay {
       }
 
       try {
+        if (this.blocklist.matches(message)) {
+          await this.removeToTrash(uid);
+          await this.clearFailed(kind, uid);
+          await this.advanceLastUid(kind, uidValidity, uid);
+          await this.spamCsv.log(message, this.mailboxPath(kind));
+          console.log(`[relay] ${kind} moved uid=${uid} by blocklist to trash on retry`);
+          continue;
+        }
+
         const archived = this.isArchived(message);
         const treatAsSpam = !archived && (this.isSourceSpam(kind) || message.isSpam);
         if (treatAsSpam && this.spamAction === 'skip') {
@@ -350,6 +382,25 @@ export class Relay {
     uidValidity: number,
   ): Promise<void> {
     const before = await this.loadFolder(kind);
+    if (this.blocklist.matches(message)) {
+      await this.saveFolder(kind, {
+        ...before,
+        lastUid: before.lastUid,
+        pendingUid: message.uid,
+      });
+      await this.removeToTrash(message.uid);
+      await this.saveFolder(kind, {
+        ...before,
+        lastUid: Math.max(before.lastUid, message.uid),
+        pendingUid: undefined,
+      });
+      await this.clearFailed(kind, message.uid);
+      await this.spamCsv.log(message, this.mailboxPath(kind));
+      console.log(
+        `[relay] ${kind} moved uid=${message.uid} by blocklist to trash from="${message.from}" subject="${message.subject}"`,
+      );
+      return;
+    }
     const archived = this.isArchived(message);
     const treatAsSpam = !archived && (this.isSourceSpam(kind) || message.isSpam);
 
