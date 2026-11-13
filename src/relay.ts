@@ -35,6 +35,10 @@ export class Relay {
     private readonly spamCsv: SpamCsvLogger = new SpamCsvLogger(''),
     private readonly blocklist: Blocklist = new Blocklist(''),
     private readonly removeTrashFolder = 'Trash',
+    private readonly ownDomains: string[] = [],
+    private readonly collectorAddress = '',
+    private readonly otherFolder = 'Andere',
+    private readonly spamFolder = '[Gmail]/Spam',
   ) {}
 
   async catchUp(): Promise<void> {
@@ -119,9 +123,28 @@ export class Relay {
     });
   }
 
-  /** Mails from the source spam folder always target Gmail Spam (or skip). */
+  /** Mails from the source spam folder always target the spam folder/label (or skip). */
   private isSourceSpam(kind: FolderKind): boolean {
     return kind === 'spam';
+  }
+
+  /** No configured own domains = alias routing disabled (treat every mail as mine). */
+  private isAddressedToMe(message: SourceMessage): boolean {
+    if (this.ownDomains.length === 0) return true;
+    const own = new Set(this.ownDomains);
+    const collector = this.collectorAddress.toLowerCase();
+    return message.recipients.some((address) => {
+      if (collector && address === collector) return false;
+      const at = address.lastIndexOf('@');
+      if (at < 0) return false;
+      return own.has(address.slice(at + 1));
+    });
+  }
+
+  /** Mail that reached the collector but was not sent to one of my aliases. */
+  private isOther(message: SourceMessage): boolean {
+    if (this.ownDomains.length === 0) return false;
+    return !this.isAddressedToMe(message);
   }
 
   /** First matching archive rule wins over spam and INBOX. */
@@ -150,6 +173,7 @@ export class Relay {
     if (this.isArchived(message)) return false;
     if (kind === 'spam') return false;
     if (message.isSpam && this.spamAction !== 'inbox') return false;
+    if (this.isOther(message)) return false;
     return true;
   }
 
@@ -348,7 +372,8 @@ export class Relay {
         await this.source.deleteMessage(uid);
         await this.clearFailed(kind, uid);
         await this.advanceLastUid(kind, uidValidity, uid);
-        const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : '';
+        const other = !archived && !treatAsSpam && this.isOther(message);
+        const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : other ? ' (other)' : '';
         if (treatAsSpam) {
           await this.spamCsv.log(message, this.mailboxPath(kind));
         }
@@ -371,9 +396,21 @@ export class Relay {
     if (this.isArchived(message)) {
       return await this.sink.archiveFolder(this.archiveFolder);
     }
-    if (this.isSourceSpam(kind)) return '[Gmail]/Spam';
-    if (!message.isSpam || this.spamAction === 'inbox') return 'INBOX';
-    return '[Gmail]/Spam';
+    // Source spam folder always targets the spam folder (skip is handled earlier).
+    if (this.isSourceSpam(kind)) {
+      await this.sink.ensureFolder(this.spamFolder);
+      return this.spamFolder;
+    }
+    if (message.isSpam) {
+      if (this.spamAction === 'inbox') return 'INBOX';
+      await this.sink.ensureFolder(this.spamFolder);
+      return this.spamFolder;
+    }
+    if (this.isOther(message)) {
+      await this.sink.ensureFolder(this.otherFolder);
+      return this.otherFolder;
+    }
+    return 'INBOX';
   }
 
   private async processOne(
@@ -465,7 +502,8 @@ export class Relay {
       pendingUid: undefined,
     });
     await this.clearFailed(kind, message.uid);
-    const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : '';
+    const other = !archived && !treatAsSpam && this.isOther(message);
+    const spamNote = treatAsSpam ? ' (spam)' : archived ? ' (archive)' : other ? ' (other)' : '';
     if (treatAsSpam) {
       await this.spamCsv.log(message, this.mailboxPath(kind));
     }

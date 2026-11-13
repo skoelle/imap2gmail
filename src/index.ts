@@ -35,6 +35,10 @@ async function main(): Promise<void> {
     spamCsv,
     blocklist,
     config.removeTrashFolder,
+    config.ownDomains,
+    config.source.email,
+    config.otherFolder,
+    config.spamFolder,
   );
 
   let shuttingDown = false;
@@ -83,6 +87,21 @@ async function main(): Promise<void> {
   if (config.archiveRules.length > 0) {
     // Warm up the All Mail discovery so the resolved path is visible in the startup log.
     await sink.archiveFolder(archiveFolderFor(config.gmailLocale));
+  }
+
+  // Create/locate the routing labels up front; failures only warn and are retried per mail.
+  try {
+    if (config.ownDomains.length > 0) {
+      await sink.ensureFolder(config.otherFolder);
+    }
+    if (config.spamAction === 'gmail-spam') {
+      await sink.ensureFolder(config.spamFolder);
+    }
+  } catch (err) {
+    console.warn(
+      '[main] folder/label warm-up failed (will retry on first matching mail):',
+      err instanceof Error ? err.message : err,
+    );
   }
 
   let removeTrash = '';
@@ -147,7 +166,7 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
   console.log(
-    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, spamCsv=${config.spamCsvFile || 'off'}, sourceSpam=${config.sourceSpamFolder || 'off'}, archiveRules=${config.archiveRules.length}, blocklist=${blocklist.enabled ? `${blocklist.count} rules (${config.removeFile}), trash="${removeTrash || 'unresolved'}"` : 'off'}, archiveLocaleFallback=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
+    `[main] running (poll every ${config.fallbackPollSeconds}s, spam=${config.spamAction}, spamFolder=${config.spamAction === 'gmail-spam' ? config.spamFolder : 'off'}, spamCsv=${config.spamCsvFile || 'off'}, sourceSpam=${config.sourceSpamFolder || 'off'}, ownDomains=${config.ownDomains.length > 0 ? `${config.ownDomains.join(',')} → ${config.otherFolder}` : 'off'}, archiveRules=${config.archiveRules.length}, blocklist=${blocklist.enabled ? `${blocklist.count} rules (${config.removeFile}), trash="${removeTrash || 'unresolved'}"` : 'off'}, archiveLocaleFallback=${config.gmailLocale}, ntfy ${ntfy.enabled ? 'on' : 'off'}${config.ntfyBlacklist.length ? `, blacklist=${config.ntfyBlacklist.length}` : ''})`,
   );
 
   const backoffMs = [3000, 5000, 15000, 60000];

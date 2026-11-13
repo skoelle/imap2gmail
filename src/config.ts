@@ -29,6 +29,12 @@ export interface AppConfig {
   ntfyTopicUrl: string;
   ntfyBlacklist: string[];
   spamAction: SpamAction;
+  /** Gmail folder/label for spam messages (header spam and source spam folder). */
+  spamFolder: string;
+  /** Domains considered "mine" for the To/Cc alias check; empty = routing off. */
+  ownDomains: string[];
+  /** Gmail folder/label for messages not addressed to one of my domains. */
+  otherFolder: string;
   archiveRules: ArchiveRule[];
   fallbackPollSeconds: number;
   reconnectAlertSeconds: number;
@@ -76,6 +82,13 @@ function listEnv(name: string): string[] {
     .filter(Boolean);
 }
 
+/** Comma-separated domains; accepts `domain.tld`, `*.domain.tld` and `*@domain.tld`. */
+function domainListEnv(name: string): string[] {
+  return listEnv(name)
+    .map((entry) => entry.replace(/^\*[@.]?/, '').replace(/^@/, ''))
+    .filter(Boolean);
+}
+
 export function loadConfig(): AppConfig {
   const stateFile = optionalEnv('STATE_FILE', '/data/state.json');
   return {
@@ -96,6 +109,9 @@ export function loadConfig(): AppConfig {
     ntfyTopicUrl: optionalEnv('NTFY__TOPIC_URL', ''),
     ntfyBlacklist: listEnv('NTFY__BLACKLIST'),
     spamAction: spamActionEnv(),
+    spamFolder: optionalEnv('SPAM__FOLDER', '[Gmail]/Spam'),
+    ownDomains: domainListEnv('MY__DOMAINS'),
+    otherFolder: optionalEnv('OTHER__FOLDER', 'Andere'),
     archiveRules: parseArchiveRules(optionalEnv('ARCHIVE__RULES', '')),
     fallbackPollSeconds: intEnv('FALLBACK_POLL_SECONDS', 60),
     reconnectAlertSeconds: intEnv('RECONNECT__ALERT_SECONDS', 3600),

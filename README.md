@@ -33,8 +33,9 @@
 3. 📨 Per message:
    - 🚫 If the `REMOVE__FILE` list matches → move to source trash, **never delivered** *(checked first)*
    - 📦 If `ARCHIVE__RULES` match → append to Gmail All Mail (folder auto-detected via SPECIAL-USE `\All`, `GMAIL__LOCALE` = fallback name), **no ntfy** *(before spam)*
-   - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to Gmail Spam, skip ntfy
-   - ✉️ Gmail `append(INBOX or All Mail or [Gmail]/Spam, raw)`
+   - 🛡️ If spam header + `SPAM__ACTION=gmail-spam` → append to `SPAM__FOLDER` (default `[Gmail]/Spam`), skip ntfy
+   - 🏷️ If `MY__DOMAINS` is set and neither `To` nor `Cc` contains one of my domains → append to `OTHER__FOLDER` (default `Andere`), no ntfy
+   - ✉️ Gmail `append(INBOX or All Mail or SPAM__FOLDER or OTHER__FOLDER, raw)`
    - 🗑️ Source UID `\Deleted` + expunge
    - ❌ Append failed → count in `state.failed`, advance past UID, retry later (no queue jam)
    - ⚠️ Delete failed after successful append → Gmail rollback (search by Message-ID and expunge)
@@ -85,6 +86,29 @@ ARCHIVE__RULES=subject~Newsletter;subject~Receipt|from~noreply@shop.de
 
 Spam (`SPAM__ACTION`) still applies only if **no** archive rule matched.
 
+### 🏷️ Alias / domain routing (`MY__DOMAINS`, `OTHER__FOLDER`)
+
+Messages that reach the collector account without being addressed to one of my
+own domains are routed to a separate Gmail label instead of INBOX.
+
+- Checked against **`To` and `Cc`** (all addresses, display names are ignored)
+- `MY__DOMAINS` is comma-separated; `moonweb.org`, `*.moonweb.org` and
+  `*@moonweb.org` are all accepted, case-insensitive
+- The collector address itself (`SOURCE__EMAIL`) never counts as "mine", so a
+  plain forward to the collector does not hide an external recipient
+- No match → append to `OTHER__FOLDER` (default `Andere`), **no ntfy**
+- `MY__DOMAINS` empty → routing is off
+- Missing labels are created via IMAP `CREATE` on startup/first use (best
+  effort; if Gmail rejects it, create the label manually once)
+
+Precedence: remove list → archive rules → spam → not-mine → INBOX. A message
+that is both spam and not addressed to me goes to `SPAM__FOLDER` (spam wins).
+
+```bash
+MY__DOMAINS=moonweb.org,inseco.de,stefankoelle.de
+OTHER__FOLDER=Andere
+```
+
 ### 🚫 Remove list (`REMOVE__FILE`)
 
 Hard blocklist for spam that is trivial to recognize by sender or subject:
@@ -127,18 +151,18 @@ Two independent paths:
 
 | `SPAM__ACTION` | Behavior |
 |---|---|
-| `gmail-spam` *(default)* | Append to Gmail `[Gmail]/Spam`, no ntfy, still delete source |
+| `gmail-spam` *(default)* | Append to `SPAM__FOLDER` (default `[Gmail]/Spam`), no ntfy, still delete source |
 | `inbox` | Append to Gmail `INBOX` as usual (log only) |
 | `skip` | Do not append to Gmail; delete from source |
 
 **B) Source spam folder** (`SOURCE__SPAM_FOLDER=Spam`, optional):
 
 - Polled on every catch-up *(no IDLE on that folder; max ~`FALLBACK_POLL_SECONDS` delay)*
-- Always → Gmail `[Gmail]/Spam` (or delete-only if `SPAM__ACTION=skip`)
+- Always → `SPAM__FOLDER` (default `[Gmail]/Spam`; delete-only if `SPAM__ACTION=skip`)
 - **Never ntfy**
 - Own cursor in `state.spam` (UIDs are per mailbox)
 
-💡 Tip: keep provider spam *in its source folder* **or** in INBOX with headers – both land in Gmail Spam for review.
+💡 Tip: keep provider spam *in its source folder* **or** in INBOX with headers – both land in `SPAM__FOLDER` for review.
 
 **CSV log** – every processed spam message *(both paths, including `skip`)* is appended to a CSV file:
 
@@ -203,6 +227,9 @@ cp .env.example .env
 | `NTFY__TOPIC_URL` | 🔔 e.g. `https://ntfy.sh/my-topic`; empty = off |
 | `NTFY__BLACKLIST` | 🤫 From addresses without ntfy *(comma-separated)*, e.g. `user@example.org` |
 | `SPAM__ACTION` | 🛡️ `gmail-spam` *(default)* \| `inbox` \| `skip` – handling for source spam headers |
+| `SPAM__FOLDER` | 🛡️ Gmail folder/label for spam; default `[Gmail]/Spam`, created if missing *(see above)* |
+| `MY__DOMAINS` | 🏷️ Own alias domains for the To/Cc check; comma-separated, empty = off *(see above)* |
+| `OTHER__FOLDER` | 🏷️ Gmail label for mail not addressed to `MY__DOMAINS`; default `Andere` |
 | `SPAM__CSV__ENABLED` / `SPAM__CSV__FILE` | 📄 CSV log of processed spam; default `true`, file `spam.csv` next to `STATE_FILE` *(see above)* |
 | `ARCHIVE__RULES` | 📦 Optional rules → Gmail All Mail, no ntfy; empty = off *(see above)* |
 | `REMOVE__FILE` | 🚫 Remove list file (move to source trash on match, never deliver); default `/data/remove-list.txt`, empty = off *(see above)* |
@@ -290,9 +317,9 @@ imap2gmail/
 │   ├── index.ts     # 🚪 Entry, main loop, shutdown
 │   ├── config.ts    # ⚙️ Env vars
 │   ├── state.ts     # 🗃️ JSON state: uid, pendingUid, failed attempts
-│   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete, spam header
-│   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/All Mail/Spam), rollback
-│   ├── relay.ts     # 🔄 Catch-up, remove list, archive rules, spam, failure retries/notice, ntfy
+│   ├── source.ts    # 📥 imapflow source: connect, IDLE, fetch raw, delete, spam header, To/Cc
+│   ├── sink.ts      # 📤 imapflow Gmail: append (INBOX/All Mail/Spam/Andere), label create, rollback
+│   ├── relay.ts     # 🔄 Catch-up, remove list, archive rules, spam, alias routing, retries/ntfy
 │   ├── blocklist.ts # 🚫 Remove list file: delete on match, hot reload
 │   └── ntfy.ts      # 🔔 HTTP-POST *(empty URL = off)*
 ├── 🐳 Dockerfile

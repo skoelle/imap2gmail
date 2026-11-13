@@ -17,6 +17,8 @@ export interface SourceMessage {
   messageId: string;
   from: string;
   to: string;
+  /** All To + Cc addresses (lowercased), used for the own-domain alias check. */
+  recipients: string[];
   subject: string;
   isSpam: boolean;
 }
@@ -296,6 +298,7 @@ function toSourceMessage(msg: FetchMessageObject): SourceMessage {
     messageId: headers.messageId,
     from: headers.from,
     to: headers.to,
+    recipients: headers.recipients,
     subject: headers.subject,
     isSpam: headers.isSpam,
   };
@@ -305,6 +308,7 @@ interface ParsedHeaders {
   messageId: string;
   from: string;
   to: string;
+  recipients: string[];
   subject: string;
   isSpam: boolean;
 }
@@ -315,20 +319,37 @@ function parseHeaders(raw: Buffer): ParsedHeaders {
   const headerBlock = sep >= 0 ? text.slice(0, sep) : text;
   const unfolded = headerBlock.replace(/\r?\n[ \t]+/g, ' ');
   const map = new Map<string, string>();
+  const addressHeaders: string[] = [];
   for (const line of unfolded.split(/\r?\n/)) {
     const colon = line.indexOf(':');
     if (colon <= 0) continue;
     const name = line.slice(0, colon).trim().toLowerCase();
     const value = line.slice(colon + 1).trim();
     if (!map.has(name)) map.set(name, value);
+    if (name === 'to' || name === 'cc') addressHeaders.push(value);
   }
   return {
     messageId: decodeMimeWords(stripAngles(map.get('message-id') ?? '')),
     from: decodeMimeWords(map.get('from') ?? ''),
     to: firstRecipient(map),
+    recipients: extractAddresses(addressHeaders),
     subject: decodeMimeWords(map.get('subject') ?? ''),
     isSpam: isSpamMessage(map),
   };
+}
+
+/** Extract lowercased e-mail addresses from To/Cc headers, dropping display names. */
+function extractAddresses(values: string[]): string[] {
+  const addresses: string[] = [];
+  for (const value of values) {
+    const decoded = decodeMimeWords(value);
+    const matches = decoded.match(/[^\s<>,;:"]+@[^\s<>,;:"]+/g) ?? [];
+    for (const match of matches) {
+      const address = match.trim().toLowerCase();
+      if (address && !addresses.includes(address)) addresses.push(address);
+    }
+  }
+  return addresses;
 }
 
 /** Prefer delivery headers over To; first address only. */

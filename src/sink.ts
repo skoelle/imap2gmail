@@ -10,6 +10,7 @@ export class Sink {
   private connecting: Promise<void> | null = null;
   private clientConnectCalled = false;
   private archivePath: string | null = null;
+  private readonly ensuredFolders = new Set<string>(['INBOX']);
 
   constructor(cfg: ImapAccountConfig) {
     this.cfg = cfg;
@@ -53,6 +54,34 @@ export class Sink {
     if (result === false) {
       throw new Error('Gmail APPEND did not run (connection not ready)');
     }
+  }
+
+  /**
+   * Ensure a Gmail label/folder exists, creating it via CREATE when missing.
+   * Creation is best-effort: a rejected CREATE only warns, so the caller's
+   * normal retry logic still applies instead of dropping the message.
+   */
+  async ensureFolder(folder: string): Promise<void> {
+    if (!folder || this.ensuredFolders.has(folder)) return;
+    await this.run(async (client) => {
+      const folders = await client.list();
+      if (folders.some((entry) => entry.path === folder)) {
+        this.ensuredFolders.add(folder);
+        return;
+      }
+      try {
+        await client.mailboxCreate(folder);
+        this.ensuredFolders.add(folder);
+        console.log(`[sink] created folder/label "${folder}"`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (/exist/i.test(message)) {
+          this.ensuredFolders.add(folder);
+          return;
+        }
+        console.warn(`[sink] could not create folder/label "${folder}": ${message}`);
+      }
+    });
   }
 
   /**
